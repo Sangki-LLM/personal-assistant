@@ -43,6 +43,39 @@ def stop_scheduler() -> None:
         _scheduler.shutdown()
 
 
+async def list_reminders(db, slack_user_id: str) -> str:
+    from app.models.reminder import Reminder
+    result = await db.execute(
+        select(Reminder).where(
+            Reminder.slack_user_id == slack_user_id,
+            Reminder.fired == False,
+        ).order_by(Reminder.run_at)
+    )
+    reminders = result.scalars().all()
+    if not reminders:
+        return "등록된 리마인더가 없습니다."
+    lines = [f"• #{r.id} {r.run_at.strftime('%m/%d %H:%M')} — {r.message}" for r in reminders]
+    return "\n".join(lines)
+
+
+async def cancel_reminder(db, slack_user_id: str, reminder_id: int) -> str:
+    from app.models.reminder import Reminder
+    result = await db.execute(
+        select(Reminder).where(
+            Reminder.id == reminder_id,
+            Reminder.slack_user_id == slack_user_id,
+            Reminder.fired == False,
+        )
+    )
+    r = result.scalar_one_or_none()
+    if not r:
+        return f"리마인더 #{reminder_id}를 찾을 수 없습니다."
+    r.fired = True
+    await db.commit()
+    logger.info("[reminder] cancelled id=%d user=%s", reminder_id, slack_user_id)
+    return f"리마인더 #{reminder_id} '{r.message}' 취소됨."
+
+
 async def set_reminder(db, slack_user_id: str, message: str, run_at: datetime) -> str:
     from app.models.reminder import Reminder
     r = Reminder(slack_user_id=slack_user_id, message=message, run_at=run_at)

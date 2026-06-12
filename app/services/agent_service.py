@@ -46,6 +46,8 @@ def _build_system_prompt() -> str:
 | 지출·비용·결제 언급 | add_expense |
 | 지출 조회·요약 요청 | get_expense_summary |
 | 알림·리마인더 설정 | set_reminder + add_todo (둘 다 호출) |
+| 리마인더 목록 조회 | list_reminders |
+| 리마인더 취소 | cancel_reminder |
 | 할 일 추가 | add_todo |
 | 할 일 목록 조회 | list_todos |
 | 할 일 완료 처리 | complete_todo |
@@ -186,6 +188,24 @@ def _make_tools(user_id: str):
         return result
 
     @langchain_tool
+    async def list_reminders() -> str:
+        """등록된 리마인더 목록을 조회합니다. (아직 울리지 않은 것만)"""
+        logger.info("[tool] list_reminders user=%s", user_id)
+        from app.core.database import AsyncSessionLocal
+        from app.services import reminder_service as rs
+        async with AsyncSessionLocal() as db:
+            return await rs.list_reminders(db, user_id)
+
+    @langchain_tool
+    async def cancel_reminder(reminder_id: int) -> str:
+        """리마인더를 취소합니다. reminder_id: list_reminders로 확인한 번호"""
+        logger.info("[tool] cancel_reminder id=%d", reminder_id)
+        from app.core.database import AsyncSessionLocal
+        from app.services import reminder_service as rs
+        async with AsyncSessionLocal() as db:
+            return await rs.cancel_reminder(db, user_id, reminder_id)
+
+    @langchain_tool
     async def add_todo(content: str) -> str:
         """할 일을 추가합니다."""
         logger.info("[tool] add_todo content=%s", content[:40])
@@ -230,8 +250,8 @@ def _make_tools(user_id: str):
             return "웹 검색 시간 초과."
 
     return [search_memory, save_memory, add_calendar_event, list_calendar_events,
-            add_expense, get_expense_summary, set_reminder, add_todo, list_todos,
-            complete_todo, web_search]
+            add_expense, get_expense_summary, set_reminder, list_reminders, cancel_reminder,
+            add_todo, list_todos, complete_todo, web_search]
 
 
 async def _invoke_graph(llm, tools, message: str, timeout: int):
