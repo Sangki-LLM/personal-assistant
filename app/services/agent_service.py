@@ -259,7 +259,7 @@ async def _invoke_graph(llm, tools, message: str, timeout: int):
     return await asyncio.wait_for(
         graph.ainvoke(
             {"messages": [("user", message)]},
-            config={"recursion_limit": 6},
+            config={"recursion_limit": 20},
         ),
         timeout=timeout,
     )
