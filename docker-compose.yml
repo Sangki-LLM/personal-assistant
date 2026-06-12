@@ -14,18 +14,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:12b}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       DATABASE_URL: ${DATABASE_URL}
-      CHROMA_HOST: chromadb
-      CHROMA_PORT: 8000
+      CHROMA_HOST: ${CHROMA_HOST}
+      CHROMA_PORT: ${CHROMA_PORT:-8001}
       GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON}
       EXPENSE_SHEET_ID: ${EXPENSE_SHEET_ID}
-    depends_on:
-      - chromadb
-
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: personal-assistant-chromadb
-    restart: always
-    ports:
-      - "8002:8000"
-    volumes:
-      - /var/lib/jenkins/personal-assistant-chromadb:/data
