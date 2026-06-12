@@ -50,6 +50,7 @@ def _build_system_prompt() -> str:
 | 할 일 목록 조회 | list_todos |
 | 할 일 완료 처리 | complete_todo |
 | 과거 대화·정보 질문 | search_memory |
+| 사용자 개인 정보 질문 ("내 ~~이 뭐야", "내 ~~이 언제야") | search_memory |
 | 중요 정보 저장 요청 | save_memory |
 | 최신 정보·검색 필요 | web_search |
 
@@ -58,6 +59,7 @@ def _build_system_prompt() -> str:
 - "10시" → "10:00", "오후 3시" → "15:00"
 
 **응답 방식:**
+- 메시지 앞에 `[기억된 정보 (자동 조회)]` 블록이 있으면 그 내용을 참고해 답변하세요
 - 도구 실행 결과를 먼저 확인한 뒤 간결하게 알려주세요
 - 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
 - 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)"""
@@ -237,6 +239,24 @@ async def _invoke_graph(llm, tools, message: str, timeout: int):
     )
 
 
+async def _prefetch_memory(user_id: str, message: str) -> str:
+    """메시지에 관련 기억을 미리 검색해서 컨텍스트로 주입한다."""
+    try:
+        from app.services import memory_service
+        memories = await asyncio.wait_for(
+            memory_service.search_memory(user_id, message),
+            timeout=10,
+        )
+        if not memories:
+            return message
+        context = "\n".join(f"- {m}" for m in memories)
+        logger.info("[agent] prefetch_memory found=%d", len(memories))
+        return f"[기억된 정보 (자동 조회)]\n{context}\n\n[사용자 메시지]\n{message}"
+    except Exception as e:
+        logger.warning("[agent] prefetch_memory failed: %s", e)
+        return message
+
+
 async def chat(user_id: str, message: str) -> str:
     """Gemini 우선 사용, 할당량 초과 시 Ollama로 자동 전환."""
     logger.info("[agent] chat user=%s message_len=%d", user_id, len(message))
@@ -247,9 +267,10 @@ async def chat(user_id: str, message: str) -> str:
     logger.info("[agent] using llm=%s", llm_name)
 
     tools = _make_tools(user_id)
+    augmented_message = await _prefetch_memory(user_id, message)
 
     try:
-        result = await _invoke_graph(llm, tools, message, timeout=120)
+        result = await _invoke_graph(llm, tools, augmented_message, timeout=120)
     except asyncio.TimeoutError:
         logger.warning("[agent] timeout llm=%s", llm_name)
         return "죄송합니다, 응답 시간이 초과되었습니다. 다시 시도해 주세요."
@@ -258,7 +279,7 @@ async def chat(user_id: str, message: str) -> str:
             logger.warning("[agent] Gemini 할당량 초과 → Ollama로 전환: %s", e)
             llm = _make_ollama()
             try:
-                result = await _invoke_graph(llm, tools, message, timeout=300)
+                result = await _invoke_graph(llm, tools, augmented_message, timeout=300)
             except asyncio.TimeoutError:
                 logger.warning("[agent] Ollama timeout")
                 return "죄송합니다, 응답 시간이 초과되었습니다. 다시 시도해 주세요."
