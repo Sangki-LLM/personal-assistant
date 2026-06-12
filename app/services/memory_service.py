@@ -8,10 +8,10 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_chroma_client: chromadb.HttpClient | None = None
+_chroma_client = None
 
 
-def _client() -> chromadb.HttpClient:
+def _client():
     global _chroma_client
     if _chroma_client is None:
         _chroma_client = chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
