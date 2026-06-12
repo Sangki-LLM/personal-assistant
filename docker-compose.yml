@@ -5,6 +5,8 @@ services:
     restart: always
     ports:
       - "6002:8000"
+    volumes:
+      - /var/lib/jenkins/personal-assistant/credentials.json:/app/credentials.json:ro
     environment:
       TZ: Asia/Seoul
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
@@ -16,5 +18,5 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       CHROMA_HOST: ${CHROMA_HOST}
       CHROMA_PORT: ${CHROMA_PORT:-8001}
-      GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON}
+      GOOGLE_CREDENTIALS_PATH: /app/credentials.json
       EXPENSE_SHEET_ID: ${EXPENSE_SHEET_ID}

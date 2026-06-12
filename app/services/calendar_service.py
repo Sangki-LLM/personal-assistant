@@ -13,9 +13,18 @@ _SCOPES = ["https://www.googleapis.com/auth/calendar"]
 _TIMEZONE = "Asia/Seoul"
 
 
+def _load_credentials_data() -> dict:
+    """파일 경로 우선, 없으면 환경변수 JSON 문자열 사용."""
+    import os
+    path = settings.google_credentials_path
+    if path and os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return json.loads(settings.google_credentials_json)
+
+
 def _service():
-    creds_data = json.loads(settings.google_credentials_json)
-    creds = service_account.Credentials.from_service_account_info(creds_data, scopes=_SCOPES)
+    creds = service_account.Credentials.from_service_account_info(_load_credentials_data(), scopes=_SCOPES)
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
