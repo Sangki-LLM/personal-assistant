@@ -16,7 +16,15 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:12b}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       DATABASE_URL: ${DATABASE_URL}
-      CHROMA_HOST: ${CHROMA_HOST}
-      CHROMA_PORT: ${CHROMA_PORT:-8001}
+      CHROMA_HOST: ${CHROMA_HOST:-chromadb}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
       GOOGLE_CREDENTIALS_PATH: /app/credentials.json
       EXPENSE_SHEET_ID: ${EXPENSE_SHEET_ID}
+    networks:
+      - default
+      - log-agent-net
+
+networks:
+  log-agent-net:
+    name: log-agent-backend_default
+    external: true

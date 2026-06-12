@@ -19,7 +19,12 @@ def _load_credentials_data() -> dict:
     path = settings.google_credentials_path
     if path and os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
+            raw = f.read()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # Groovy echo가 \n을 실제 줄바꿈으로 변환했을 때 fallback
+            return json.loads(raw, strict=False)
     return json.loads(settings.google_credentials_json)
 
 
