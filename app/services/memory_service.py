@@ -41,6 +41,20 @@ async def store_memory(user_id: str, text: str) -> None:
     try:
         embeddings = await _embed([text[:2000]])
         col = _collection(user_id)
+
+        # 유사도 95% 이상인 기억이 이미 있으면 중복 저장 생략
+        count = col.count()
+        if count > 0:
+            results = col.query(
+                query_embeddings=embeddings,
+                n_results=1,
+                include=["distances"],
+            )
+            distances = results["distances"][0]
+            if distances and distances[0] < 0.05:
+                logger.info("[memory] skip duplicate (distance=%.4f) user=%s", distances[0], user_id)
+                return
+
         doc_id = f"mem_{int(time.time() * 1000)}"
         col.upsert(
             ids=[doc_id],
