@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,20 +19,24 @@ async def add_todo(db: AsyncSession, user_id: str, content: str) -> str:
 
 
 async def list_todos(db: AsyncSession, user_id: str) -> str:
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     result = await db.execute(
         select(Todo)
-        .where(Todo.user_id == user_id, Todo.done == False)
+        .where(Todo.user_id == user_id, Todo.created_at >= today_start)
         .order_by(Todo.created_at)
     )
     todos = result.scalars().all()
     if not todos:
-        return "할 일 목록이 없습니다."
-    display = ["*할 일 목록*"]
+        return "오늘 등록된 할 일이 없습니다."
+    display = ["*오늘 할 일*"]
     refs = []
     for t in todos:
-        display.append(f"• {t.content}")
-        refs.append(f"id={t.id}: {t.content}")
-    display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
+        check = "✅" if t.done else "⬜"
+        display.append(f"{check} {t.content}")
+        if not t.done:
+            refs.append(f"id={t.id}: {t.content}")
+    if refs:
+        display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
     return "\n".join(display)
 
 
