@@ -22,3 +22,5 @@ services:
       CHROMA_PORT: ${CHROMA_PORT:-8001}
       GOOGLE_CREDENTIALS_PATH: /app/credentials.json
       EXPENSE_SHEET_ID: ${EXPENSE_SHEET_ID}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}

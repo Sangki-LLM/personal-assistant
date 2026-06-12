@@ -9,7 +9,11 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""
     slack_my_user_id: str = ""  # 허용된 사용자 ID (보안)
 
-    # Ollama
+    # Gemini (기본 LLM — 할당량 초과 시 Ollama fallback)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+
+    # Ollama (fallback LLM)
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "gemma4:12b"
     ollama_embed_model: str = "nomic-embed-text"

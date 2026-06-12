@@ -9,6 +9,23 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _is_quota_error(e: Exception) -> bool:
+    s = str(e).lower()
+    return any(k in s for k in ("quota", "429", "resource exhausted", "rate limit"))
+
+
+def _make_ollama():
+    return ChatOllama(model=settings.ollama_model, base_url=settings.ollama_host, think=False)
+
+
+def _make_gemini():
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    return ChatGoogleGenerativeAI(
+        model=settings.gemini_model,
+        google_api_key=settings.gemini_api_key,
+    )
+
 _TOOL_TIMEOUT = 45  # 도구별 최대 대기 시간 (초)
 
 SYSTEM_PROMPT = """당신은 친절하고 유능한 개인 비서입니다. 항상 한국어로 답변하세요.
@@ -197,59 +214,69 @@ def _make_tools(user_id: str):
             complete_todo, web_search]
 
 
+async def _invoke_graph(llm, tools, message: str, timeout: int):
+    graph = create_react_agent(model=llm, tools=tools, prompt=SYSTEM_PROMPT)
+    return await asyncio.wait_for(
+        graph.ainvoke(
+            {"messages": [("user", message)]},
+            config={"recursion_limit": 6},
+        ),
+        timeout=timeout,
+    )
+
+
 async def chat(user_id: str, message: str) -> str:
-    """사용자 메시지를 받아 LangGraph ReAct 에이전트로 처리한다."""
+    """Gemini 우선 사용, 할당량 초과 시 Ollama로 자동 전환."""
     logger.info("[agent] chat user=%s message_len=%d", user_id, len(message))
 
-    llm = ChatOllama(
-        model=settings.ollama_model,
-        base_url=settings.ollama_host,
-        think=False,
-    )
+    use_gemini = bool(settings.gemini_api_key)
+    llm = _make_gemini() if use_gemini else _make_ollama()
+    llm_name = settings.gemini_model if use_gemini else settings.ollama_model
+    logger.info("[agent] using llm=%s", llm_name)
+
     tools = _make_tools(user_id)
-    graph = create_react_agent(model=llm, tools=tools, prompt=SYSTEM_PROMPT)
 
     try:
-        result = await asyncio.wait_for(
-            graph.ainvoke(
-                {"messages": [("user", message)]},
-                config={"recursion_limit": 6},
-            ),
-            timeout=300,
-        )
-        # 디버그: 메시지 흐름 확인
-        for i, msg in enumerate(result["messages"]):
-            c = msg.content
-            tc = getattr(msg, "tool_calls", [])
-            logger.info("[agent] msg[%d] type=%s content_len=%d tool_calls=%d",
-                        i, type(msg).__name__, len(str(c)), len(tc))
-
-        raw = result["messages"][-1].content
-        # content가 list 형태인 경우 (newer LangChain multimodal format)
-        if isinstance(raw, list):
-            reply = " ".join(
-                b["text"] for b in raw if isinstance(b, dict) and b.get("type") == "text"
-            )
-        else:
-            reply = raw or ""
-
-        if not reply.strip():
-            logger.warning("[agent] empty reply — scanning previous messages")
-            for msg in reversed(result["messages"][:-1]):
-                c = msg.content
-                text = (" ".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text")
-                        if isinstance(c, list) else (c or ""))
-                if text.strip():
-                    reply = text
-                    break
-            else:
-                reply = "처리가 완료되었습니다."
-
-        logger.info("[agent] reply_len=%d", len(reply))
-        return reply
+        result = await _invoke_graph(llm, tools, message, timeout=120)
     except asyncio.TimeoutError:
-        logger.warning("[agent] timeout after 300s")
+        logger.warning("[agent] timeout llm=%s", llm_name)
         return "죄송합니다, 응답 시간이 초과되었습니다. 다시 시도해 주세요."
     except Exception as e:
-        logger.warning("[agent] error: %s", e)
-        return "죄송합니다, 오류가 발생했습니다."
+        if use_gemini and _is_quota_error(e):
+            logger.warning("[agent] Gemini 할당량 초과 → Ollama로 전환: %s", e)
+            llm = _make_ollama()
+            try:
+                result = await _invoke_graph(llm, tools, message, timeout=300)
+            except asyncio.TimeoutError:
+                logger.warning("[agent] Ollama timeout")
+                return "죄송합니다, 응답 시간이 초과되었습니다. 다시 시도해 주세요."
+            except Exception as e2:
+                logger.warning("[agent] Ollama error: %s", e2)
+                return "죄송합니다, 오류가 발생했습니다."
+        else:
+            logger.warning("[agent] error llm=%s: %s", llm_name, e)
+            return "죄송합니다, 오류가 발생했습니다."
+
+    # 응답 추출 (content가 list인 경우 처리)
+    def _extract_text(content) -> str:
+        if isinstance(content, list):
+            return " ".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text")
+        return content or ""
+
+    for i, msg in enumerate(result["messages"]):
+        tc = getattr(msg, "tool_calls", [])
+        logger.info("[agent] msg[%d] type=%s content_len=%d tool_calls=%d",
+                    i, type(msg).__name__, len(str(msg.content)), len(tc))
+
+    reply = _extract_text(result["messages"][-1].content)
+    if not reply.strip():
+        logger.warning("[agent] empty reply — scanning previous messages")
+        for msg in reversed(result["messages"][:-1]):
+            reply = _extract_text(msg.content)
+            if reply.strip():
+                break
+        else:
+            reply = "처리가 완료되었습니다."
+
+    logger.info("[agent] reply_len=%d", len(reply))
+    return reply
