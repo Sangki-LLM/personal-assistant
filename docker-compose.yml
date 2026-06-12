@@ -1,0 +1,31 @@
+services:
+  personal-assistant:
+    image: personal-assistant:${IMAGE_TAG:-latest}
+    container_name: personal-assistant
+    restart: always
+    ports:
+      - "6002:8000"
+    environment:
+      TZ: Asia/Seoul
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      SLACK_MY_USER_ID: ${SLACK_MY_USER_ID}
+      OLLAMA_HOST: ${OLLAMA_HOST}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:12b}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      DATABASE_URL: ${DATABASE_URL}
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON}
+      EXPENSE_SHEET_ID: ${EXPENSE_SHEET_ID}
+    depends_on:
+      - chromadb
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: personal-assistant-chromadb
+    restart: always
+    ports:
+      - "8002:8000"
+    volumes:
+      - /var/lib/jenkins/personal-assistant-chromadb:/data
