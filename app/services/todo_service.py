@@ -14,7 +14,7 @@ async def add_todo(db: AsyncSession, user_id: str, content: str) -> str:
     await db.commit()
     await db.refresh(todo)
     logger.info("[todo] added id=%d user=%s", todo.id, user_id)
-    return f"할 일 추가: [{todo.id}] {content}"
+    return f"할 일 추가됨: {content} [AGENT_ONLY id={todo.id}]"
 
 
 async def list_todos(db: AsyncSession, user_id: str) -> str:
@@ -26,10 +26,13 @@ async def list_todos(db: AsyncSession, user_id: str) -> str:
     todos = result.scalars().all()
     if not todos:
         return "할 일 목록이 없습니다."
-    lines = ["📋 할 일 목록"]
+    display = ["*할 일 목록*"]
+    refs = []
     for t in todos:
-        lines.append(f"• [{t.id}] {t.content}")
-    return "\n".join(lines)
+        display.append(f"• {t.content}")
+        refs.append(f"id={t.id}: {t.content}")
+    display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
+    return "\n".join(display)
 
 
 async def complete_todo(db: AsyncSession, user_id: str, todo_id: int) -> str:
