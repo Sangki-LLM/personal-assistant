@@ -8,6 +8,7 @@ from app.api.v1.routes import slack
 from app.core.config import settings
 from app.core.database import init_db
 from app.middleware.logging import HttpLoggingMiddleware
+from app.services import reminder_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,8 +19,12 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # models import so Base.metadata includes all tables
+    from app.models import reminder, todo  # noqa: F401
     await init_db()
+    reminder_service.start_scheduler()
     yield
+    reminder_service.stop_scheduler()
 
 
 app = FastAPI(

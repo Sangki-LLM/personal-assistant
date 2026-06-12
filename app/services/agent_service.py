@@ -18,6 +18,10 @@ SYSTEM_PROMPT = """당신은 친절하고 유능한 개인 비서입니다. 항�
 - list_calendar_events: 특정 날의 일정을 조회합니다
 - add_expense: 지출을 Google Sheets에 기록합니다
 - get_expense_summary: 월별 지출 요약을 조회합니다
+- set_reminder: 특정 시간에 알림을 설정합니다
+- add_todo: 할 일을 추가합니다
+- list_todos: 할 일 목록을 조회합니다
+- complete_todo: 할 일을 완료 처리합니다
 
 대화 흐름:
 1. 사용자가 과거 정보를 물어보면 search_memory를 먼저 호출하세요
@@ -68,8 +72,55 @@ def _make_tools(user_id: str):
         from app.services import expense_service
         return expense_service.get_monthly_summary(year_month)
 
+    @langchain_tool
+    async def set_reminder(message: str, datetime_str: str) -> str:
+        """특정 시간에 Slack 알림을 설정합니다. datetime_str: 'YYYY-MM-DD HH:MM' 또는 '30분 후', '1시간 후'"""
+        from datetime import datetime, timedelta
+        from app.core.database import AsyncSessionLocal
+        from app.services import reminder_service as rs
+
+        now = datetime.now()
+        # 상대 시간 파싱
+        import re
+        m = re.search(r"(\d+)\s*(분|시간)", datetime_str)
+        if m:
+            val, unit = int(m.group(1)), m.group(2)
+            run_at = now + (timedelta(minutes=val) if unit == "분" else timedelta(hours=val))
+        else:
+            try:
+                run_at = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
+            except ValueError:
+                return "시간 형식을 인식하지 못했습니다. 예: '30분 후', '2026-06-12 15:00'"
+
+        async with AsyncSessionLocal() as db:
+            return await rs.set_reminder(db, user_id, message, run_at)
+
+    @langchain_tool
+    async def add_todo(content: str) -> str:
+        """할 일을 추가합니다."""
+        from app.core.database import AsyncSessionLocal
+        from app.services import todo_service
+        async with AsyncSessionLocal() as db:
+            return await todo_service.add_todo(db, user_id, content)
+
+    @langchain_tool
+    async def list_todos() -> str:
+        """완료되지 않은 할 일 목록을 조회합니다."""
+        from app.core.database import AsyncSessionLocal
+        from app.services import todo_service
+        async with AsyncSessionLocal() as db:
+            return await todo_service.list_todos(db, user_id)
+
+    @langchain_tool
+    async def complete_todo(todo_id: int) -> str:
+        """할 일을 완료 처리합니다. todo_id: 할 일 번호"""
+        from app.core.database import AsyncSessionLocal
+        from app.services import todo_service
+        async with AsyncSessionLocal() as db:
+            return await todo_service.complete_todo(db, user_id, todo_id)
+
     return [search_memory, save_memory, add_calendar_event, list_calendar_events,
-            add_expense, get_expense_summary]
+            add_expense, get_expense_summary, set_reminder, add_todo, list_todos, complete_todo]
 
 
 async def chat(user_id: str, message: str) -> str:
