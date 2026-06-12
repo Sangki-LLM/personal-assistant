@@ -7,5 +7,4 @@ dist/
 *.egg-info/
 .pytest_cache/
 *.db
-uv.lock
 Jenkinsfile
