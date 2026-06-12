@@ -41,7 +41,8 @@ def _build_system_prompt() -> str:
 
 | 상황 | 호출할 도구 |
 |---|---|
-| 일정 추가·예약·약속 언급 | add_calendar_event |
+| "추가해줘", "등록해줘", "예약해줘", "캘린더에 넣어줘" + 날짜/시간 | add_calendar_event |
+| "기억해줘", "메모해줘", "저장해줘" → 날짜가 있어도 save_memory 우선 | save_memory |
 | 일정 조회 요청 | list_calendar_events |
 | 지출·비용·결제 언급 | add_expense |
 | 지출 조회·요약 요청 | get_expense_summary |
