@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import warnings
 from datetime import date
 
 from langchain_core.tools import tool as langchain_tool
@@ -7,6 +8,9 @@ from langchain_ollama import ChatOllama
 from langgraph.prebuilt import create_react_agent
 
 from app.core.config import settings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="langgraph")
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 logger = logging.getLogger(__name__)
 
