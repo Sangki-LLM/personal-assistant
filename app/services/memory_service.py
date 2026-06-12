@@ -42,17 +42,28 @@ async def store_memory(user_id: str, text: str) -> None:
         embeddings = await _embed([text[:2000]])
         col = _collection(user_id)
 
-        # 유사도 95% 이상인 기억이 이미 있으면 중복 저장 생략
+        # 유사도 95% 이상인 기억이 이미 있으면 덮어쓰기 (중복 저장 방지 + 정보 갱신)
         count = col.count()
         if count > 0:
             results = col.query(
                 query_embeddings=embeddings,
                 n_results=1,
-                include=["distances"],
+                include=["distances", "documents"],
             )
             distances = results["distances"][0]
             if distances and distances[0] < 0.05:
-                logger.info("[memory] skip duplicate (distance=%.4f) user=%s", distances[0], user_id)
+                existing_id = results["ids"][0][0]
+                existing_doc = results["documents"][0][0]
+                if existing_doc == text[:2000]:
+                    logger.info("[memory] skip exact duplicate user=%s", user_id)
+                    return
+                col.update(
+                    ids=[existing_id],
+                    documents=[text[:2000]],
+                    embeddings=embeddings,
+                    metadatas=[{"timestamp": str(int(time.time()))}],
+                )
+                logger.info("[memory] updated id=%s user=%s (distance=%.4f)", existing_id, user_id, distances[0])
                 return
 
         doc_id = f"mem_{int(time.time() * 1000)}"
