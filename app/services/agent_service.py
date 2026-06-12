@@ -213,11 +213,38 @@ async def chat(user_id: str, message: str) -> str:
         result = await asyncio.wait_for(
             graph.ainvoke(
                 {"messages": [("user", message)]},
-                config={"recursion_limit": 10},
+                config={"recursion_limit": 6},
             ),
             timeout=300,
         )
-        reply = result["messages"][-1].content
+        # 디버그: 메시지 흐름 확인
+        for i, msg in enumerate(result["messages"]):
+            c = msg.content
+            tc = getattr(msg, "tool_calls", [])
+            logger.info("[agent] msg[%d] type=%s content_len=%d tool_calls=%d",
+                        i, type(msg).__name__, len(str(c)), len(tc))
+
+        raw = result["messages"][-1].content
+        # content가 list 형태인 경우 (newer LangChain multimodal format)
+        if isinstance(raw, list):
+            reply = " ".join(
+                b["text"] for b in raw if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            reply = raw or ""
+
+        if not reply.strip():
+            logger.warning("[agent] empty reply — scanning previous messages")
+            for msg in reversed(result["messages"][:-1]):
+                c = msg.content
+                text = (" ".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text")
+                        if isinstance(c, list) else (c or ""))
+                if text.strip():
+                    reply = text
+                    break
+            else:
+                reply = "처리가 완료되었습니다."
+
         logger.info("[agent] reply_len=%d", len(reply))
         return reply
     except asyncio.TimeoutError:
