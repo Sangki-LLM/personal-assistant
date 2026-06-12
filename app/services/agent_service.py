@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import date
 
 from langchain_core.tools import tool as langchain_tool
 from langchain_ollama import ChatOllama
@@ -28,27 +29,34 @@ def _make_gemini():
 
 _TOOL_TIMEOUT = 45  # 도구별 최대 대기 시간 (초)
 
-SYSTEM_PROMPT = """당신은 친절하고 유능한 개인 비서입니다. 항상 한국어로 답변하세요.
+def _build_system_prompt() -> str:
+    today = date.today().isoformat()
+    return f"""당신은 유능한 개인 비서입니다. 오늘 날짜: {today}. 항상 한국어로 답변하세요.
 
-사용 가능한 도구:
-- search_memory: 과거 대화나 메모에서 관련 내용을 검색합니다
-- save_memory: 중요한 정보를 기억합니다
-- add_calendar_event: Google Calendar에 일정을 추가합니다
-- list_calendar_events: 특정 날의 일정을 조회합니다
-- add_expense: 지출을 Google Sheets에 기록합니다
-- get_expense_summary: 월별 지출 요약을 조회합니다
-- set_reminder: 특정 시간에 알림을 설정합니다
-- add_todo: 할 일을 추가합니다
-- list_todos: 할 일 목록을 조회합니다
-- complete_todo: 할 일을 완료 처리합니다
-- web_search: 인터넷에서 최신 정보를 검색합니다
+**도구 호출 규칙 — 반드시 준수:**
 
-대화 흐름:
-1. 사용자가 과거 정보를 물어보면 search_memory를 먼저 호출하세요
-2. 사용자가 기억해달라고 하면 save_memory를 호출하세요
-3. 일정 추가/조회 요청에는 calendar 도구를 사용하세요
-4. 날짜는 YYYY-MM-DD, 시간은 HH:MM 형식으로 변환해서 전달하세요
-5. 간결하고 친근하게 답변하세요"""
+| 상황 | 호출할 도구 |
+|---|---|
+| 일정 추가·예약·약속 언급 | add_calendar_event |
+| 일정 조회 요청 | list_calendar_events |
+| 지출·비용·결제 언급 | add_expense |
+| 지출 조회·요약 요청 | get_expense_summary |
+| 알림·리마인더 설정 | set_reminder |
+| 할 일 추가 | add_todo |
+| 할 일 목록 조회 | list_todos |
+| 할 일 완료 처리 | complete_todo |
+| 과거 대화·정보 질문 | search_memory |
+| 중요 정보 저장 요청 | save_memory |
+| 최신 정보·검색 필요 | web_search |
+
+**날짜 변환 (오늘={today} 기준):**
+- "다음주 토요일" → 실제 YYYY-MM-DD 계산 후 전달
+- "10시" → "10:00", "오후 3시" → "15:00"
+
+**응답 방식:**
+- 도구 실행 결과를 먼저 확인한 뒤 간결하게 알려주세요
+- 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
+- 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)"""
 
 
 def _make_tools(user_id: str):
@@ -215,7 +223,7 @@ def _make_tools(user_id: str):
 
 
 async def _invoke_graph(llm, tools, message: str, timeout: int):
-    graph = create_react_agent(model=llm, tools=tools, prompt=SYSTEM_PROMPT)
+    graph = create_react_agent(model=llm, tools=tools, prompt=_build_system_prompt())
     return await asyncio.wait_for(
         graph.ainvoke(
             {"messages": [("user", message)]},
