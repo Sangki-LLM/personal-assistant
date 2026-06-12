@@ -76,7 +76,7 @@ def add_event(title: str, date_str: str, time_str: str, description: str = "") -
             "start": {"dateTime": start_dt, "timeZone": _TIMEZONE},
             "end": {"dateTime": end_dt, "timeZone": _TIMEZONE},
         }
-        created = service.events().insert(calendarId="primary", body=event).execute()
+        created = service.events().insert(calendarId=settings.google_calendar_id, body=event).execute()
         logger.info("[calendar] event created: %s", created.get("id"))
         return f"일정 등록 완료: {title} ({start_dt[:16]})"
     except Exception as e:
@@ -104,7 +104,7 @@ def list_events(date_str: str) -> str:
 
         service = _service()
         events_result = service.events().list(
-            calendarId="primary",
+            calendarId=settings.google_calendar_id,
             timeMin=start.isoformat() + "+09:00",
             timeMax=end.isoformat() + "+09:00",
             singleEvents=True,

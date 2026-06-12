@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Google (파일 경로 우선, 없으면 JSON 문자열 직접 사용)
     google_credentials_path: str = "/app/credentials.json"
     google_credentials_json: str = ""
+    google_calendar_id: str = "primary"  # 사용자 캘린더 ID (Gmail 주소 권장)
     expense_sheet_id: str = ""
 
 
