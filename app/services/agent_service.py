@@ -530,6 +530,15 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
         else:
             reply = "처리가 완료되었습니다."
 
+    # save_memory 단독 호출 시 LLM 해설 메시지 억제 (Block Kit이 이미 전송됨)
+    tools_called = {
+        tc.get("name", "")
+        for msg in result["messages"]
+        for tc in getattr(msg, "tool_calls", [])
+    }
+    if tools_called == {"save_memory"}:
+        return ""
+
     logger.info("[agent] reply_len=%d", len(reply))
 
     return reply
