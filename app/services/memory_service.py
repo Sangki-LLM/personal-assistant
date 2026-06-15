@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 import chromadb
@@ -106,20 +107,60 @@ async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]
         return None, None
 
 
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
+
+
 async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
-    """과거 대화/메모에서 유사한 내용을 검색한다."""
+    """벡터 + BM25 하이브리드 검색 (RRF 융합)으로 관련 기억을 반환한다."""
     try:
+        from rank_bm25 import BM25Okapi
+
         col = _collection(user_id)
         count = col.count()
         if count == 0:
             return []
+
+        candidates = min(max(n * 2, 5), count)
+
+        # --- 벡터 검색 ---
         embeddings = await _embed([query[:2000]])
-        results = col.query(
+        vec_results = col.query(
             query_embeddings=embeddings,
-            n_results=min(n, count),
+            n_results=candidates,
+            include=["documents"],
         )
-        docs = results["documents"][0]
-        logger.info("[memory] search user=%s found=%d", user_id, len(docs))
+        vec_ids: list[str] = vec_results["ids"][0]
+        vec_docs: list[str] = vec_results["documents"][0]
+
+        # --- BM25 검색 ---
+        all_data = col.get(limit=min(count, 2000), include=["documents"])
+        all_ids: list[str] = all_data["ids"]
+        all_docs: list[str] = all_data["documents"]
+
+        tokenized_corpus = [_tokenize(doc) for doc in all_docs]
+        bm25 = BM25Okapi(tokenized_corpus)
+        bm25_scores = bm25.get_scores(_tokenize(query))
+        bm25_top_idx = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:candidates]
+
+        # --- RRF 융합 (K=60) ---
+        K = 60
+        rrf: dict[str, float] = {}
+        id_to_doc: dict[str, str] = {}
+
+        for rank, (doc_id, doc) in enumerate(zip(vec_ids, vec_docs)):
+            rrf[doc_id] = rrf.get(doc_id, 0.0) + 1 / (K + rank + 1)
+            id_to_doc[doc_id] = doc
+
+        for rank, idx in enumerate(bm25_top_idx):
+            doc_id = all_ids[idx]
+            rrf[doc_id] = rrf.get(doc_id, 0.0) + 1 / (K + rank + 1)
+            id_to_doc[doc_id] = all_docs[idx]
+
+        sorted_ids = sorted(rrf, key=lambda d: rrf[d], reverse=True)
+        docs = [id_to_doc[doc_id] for doc_id in sorted_ids[:n]]
+
+        logger.info("[memory] hybrid search user=%s found=%d (vec+bm25 rrf)", user_id, len(docs))
         return docs
     except Exception as e:
         logger.warning("[memory] search failed: %s", e)
