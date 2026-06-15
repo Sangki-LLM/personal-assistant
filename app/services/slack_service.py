@@ -11,9 +11,12 @@ def _client() -> AsyncWebClient:
     return AsyncWebClient(token=settings.slack_bot_token)
 
 
-async def send_message(channel_id: str, text: str) -> None:
+async def send_message(channel_id: str, text: str, blocks: list | None = None) -> None:
     try:
-        await _client().chat_postMessage(channel=channel_id, text=text)
+        kwargs: dict = {"channel": channel_id, "text": text}
+        if blocks:
+            kwargs["blocks"] = blocks
+        await _client().chat_postMessage(**kwargs)
         logger.info("[slack] sent to channel=%s", channel_id)
     except Exception as e:
         logger.warning("[slack] send_message failed: %s", e)

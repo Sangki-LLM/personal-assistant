@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,23 @@ async def list_todos(db: AsyncSession, user_id: str) -> str:
     if refs:
         display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
     return "\n".join(display)
+
+
+async def list_completed_todos(db: AsyncSession, user_id: str, days: int = 7) -> str:
+    """지난 N일 동안 완료된 할 일 목록을 반환한다."""
+    since = datetime.now() - timedelta(days=days)
+    result = await db.execute(
+        select(Todo)
+        .where(Todo.user_id == user_id, Todo.done == True, Todo.created_at >= since)
+        .order_by(Todo.created_at)
+    )
+    todos = result.scalars().all()
+    if not todos:
+        return f"지난 {days}일 동안 완료한 할 일이 없습니다."
+    lines = [f"✅ 지난 {days}일 완료한 일 ({len(todos)}개)"]
+    for t in todos:
+        lines.append(f"• {t.content}")
+    return "\n".join(lines)
 
 
 async def complete_todo(db: AsyncSession, user_id: str, todo_id: int) -> str:

@@ -42,28 +42,35 @@ async def store_memory(user_id: str, text: str) -> None:
         embeddings = await _embed([text[:2000]])
         col = _collection(user_id)
 
-        # 유사도 95% 이상인 기억이 이미 있으면 덮어쓰기 (중복 저장 방지 + 정보 갱신)
+        # 유사도 95% 이상인 기억이 이미 있으면 첫 번째는 update, 나머지는 delete (중복 제거)
         count = col.count()
         if count > 0:
             results = col.query(
                 query_embeddings=embeddings,
-                n_results=1,
+                n_results=min(3, count),
                 include=["distances", "documents"],
             )
             distances = results["distances"][0]
-            if distances and distances[0] < 0.05:
-                existing_id = results["ids"][0][0]
-                existing_doc = results["documents"][0][0]
-                if existing_doc == text[:2000]:
+            ids = results["ids"][0]
+            docs = results["documents"][0]
+
+            similar_ids = [ids[i] for i, d in enumerate(distances) if d < 0.05]
+            if similar_ids:
+                if docs[0] == text[:2000]:
                     logger.info("[memory] skip exact duplicate user=%s", user_id)
                     return
+                # 첫 번째 문서를 새 내용으로 update
                 col.update(
-                    ids=[existing_id],
+                    ids=[similar_ids[0]],
                     documents=[text[:2000]],
                     embeddings=embeddings,
                     metadatas=[{"timestamp": str(int(time.time()))}],
                 )
-                logger.info("[memory] updated id=%s user=%s (distance=%.4f)", existing_id, user_id, distances[0])
+                logger.info("[memory] updated id=%s user=%s", similar_ids[0], user_id)
+                # 나머지 유사 문서는 삭제 (중복 제거)
+                if len(similar_ids) > 1:
+                    col.delete(ids=similar_ids[1:])
+                    logger.info("[memory] deleted %d duplicates user=%s", len(similar_ids) - 1, user_id)
                 return
 
         doc_id = f"mem_{int(time.time() * 1000)}"
@@ -76,6 +83,27 @@ async def store_memory(user_id: str, text: str) -> None:
         logger.info("[memory] stored id=%s user=%s", doc_id, user_id)
     except Exception as e:
         logger.warning("[memory] store failed: %s", e)
+
+
+async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]:
+    """유사한 기억이 있으면 (existing_id, existing_doc) 반환, 없으면 (None, None)."""
+    try:
+        embeddings = await _embed([text[:2000]])
+        col = _collection(user_id)
+        count = col.count()
+        if count == 0:
+            return None, None
+        results = col.query(
+            query_embeddings=embeddings,
+            n_results=1,
+            include=["distances", "documents"],
+        )
+        if results["distances"][0] and results["distances"][0][0] < 0.05:
+            return results["ids"][0][0], results["documents"][0][0]
+        return None, None
+    except Exception as e:
+        logger.warning("[memory] find_similar failed: %s", e)
+        return None, None
 
 
 async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:

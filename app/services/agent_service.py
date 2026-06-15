@@ -14,6 +14,11 @@ warnings.filterwarnings("ignore", category=ResourceWarning)
 
 logger = logging.getLogger(__name__)
 
+# 확인 대기 중인 메모리 저장 요청: user_id → {action, text, existing_id, existing_doc}
+_pending_memory: dict[str, dict] = {}
+# 확인 대기 중인 지출 기록 요청: user_id → {amount, category, memo}
+_pending_expense: dict[str, dict] = {}
+
 
 def _is_quota_error(e: Exception) -> bool:
     s = str(e).lower()
@@ -31,7 +36,8 @@ def _make_gemini():
         google_api_key=settings.gemini_api_key,
     )
 
-_TOOL_TIMEOUT = 45  # 도구별 최대 대기 시간 (초)
+_TOOL_TIMEOUT = 45
+
 
 def _build_system_prompt() -> str:
     today = date.today().isoformat()
@@ -43,6 +49,7 @@ def _build_system_prompt() -> str:
 |---|---|
 | "추가해줘", "등록해줘", "예약해줘", "캘린더에 넣어줘" + 날짜/시간 | add_calendar_event |
 | "기억해줘", "메모해줘", "저장해줘" → 날짜가 있어도 save_memory 우선 | save_memory |
+| 이름, 전화번호, 이메일, 생일 등 연락처 정보 | save_memory (형식: "이름: OOO, 전화: ..., 생일: ...") |
 | 일정 조회 요청 | list_calendar_events |
 | 지출·비용·결제 언급 | add_expense |
 | 지출 조회·요약 요청 | get_expense_summary |
@@ -53,8 +60,9 @@ def _build_system_prompt() -> str:
 | 할 일 목록 조회 | list_todos |
 | 할 일 완료 처리 | complete_todo |
 | 과거 대화·정보 질문 | search_memory |
-| 사용자 개인 정보 질문 ("내 ~~이 뭐야", "내 ~~이 언제야") | search_memory |
-| 중요 정보 저장 요청 | save_memory |
+| 사용자 개인 정보 질문 ("내 ~~이 뭐야", "~~이 언제야") | search_memory |
+| 날씨 질문 ("~~ 날씨", "날씨 어때") | get_weather(location=지역명) |
+| URL이 포함된 메시지 | summarize_url |
 | 최신 정보·검색 필요 | web_search |
 
 **날짜 변환 (오늘={today} 기준):**
@@ -72,10 +80,11 @@ def _build_system_prompt() -> str:
 - 메시지 앞에 `[기억된 정보 (자동 조회)]` 블록이 있으면 그 내용을 참고해 답변하세요
 - 도구 실행 결과를 먼저 확인한 뒤 간결하게 알려주세요
 - 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
-- 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)"""
+- 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)
+- save_memory 도구를 호출하면 Slack 버튼으로 확인 요청이 전송됩니다. 추가 행동 없이 기다리세요."""
 
 
-def _make_tools(user_id: str):
+def _make_tools(user_id: str, channel_id: str = ""):
     @langchain_tool
     async def search_memory(query: str) -> str:
         """과거 대화나 기억에서 관련 내용을 검색합니다."""
@@ -89,12 +98,122 @@ def _make_tools(user_id: str):
 
     @langchain_tool
     async def save_memory(text: str) -> str:
-        """중요한 정보를 기억합니다."""
+        """중요한 정보를 기억합니다. 사용자 확인 후 저장됩니다."""
         logger.info("[tool] save_memory user=%s text_len=%d", user_id, len(text))
-        from app.services import memory_service
-        await memory_service.store_memory(user_id, text)
-        logger.info("[tool] save_memory done")
-        return "기억했습니다."
+        from app.services import memory_service, slack_service
+
+        existing_id, existing_doc = await memory_service.find_similar(user_id, text)
+
+        if existing_id and existing_doc:
+            _pending_memory[user_id] = {
+                "action": "update",
+                "text": text,
+                "existing_id": existing_id,
+                "existing_doc": existing_doc,
+            }
+            confirm_text = (
+                f"🔄 기존 기억을 수정할게요.\n"
+                f"• 기존: _{existing_doc[:100]}_\n"
+                f"• 수정: _{text[:100]}_\n맞나요?"
+            )
+        else:
+            _pending_memory[user_id] = {
+                "action": "new",
+                "text": text,
+                "existing_id": None,
+                "existing_doc": None,
+            }
+            confirm_text = f"💾 이렇게 기억할게요: _{text[:150]}_\n맞나요?"
+
+        if channel_id:
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": confirm_text},
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "예"},
+                            "action_id": "memory_confirm",
+                            "value": user_id,
+                            "style": "primary",
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "아니오"},
+                            "action_id": "memory_cancel",
+                            "value": user_id,
+                        },
+                    ],
+                },
+            ]
+            await slack_service.send_message(channel_id, confirm_text, blocks=blocks)
+            return "사용자에게 확인을 요청했습니다. 버튼 응답을 기다립니다."
+        else:
+            await memory_service.store_memory(user_id, text)
+            return "기억했습니다."
+
+    @langchain_tool
+    async def get_weather(location: str) -> str:
+        """날씨 정보를 가져옵니다. location: 도시명 (예: 서울, 수원, Busan)"""
+        logger.info("[tool] get_weather location=%s", location)
+        from app.services import weather_service
+        return await weather_service.get_weather(location)
+
+    @langchain_tool
+    async def summarize_url(url: str) -> str:
+        """URL의 내용을 가져와 요약합니다."""
+        logger.info("[tool] summarize_url url=%s", url[:80])
+        try:
+            import httpx
+            from html.parser import HTMLParser
+
+            class _TextExtractor(HTMLParser):
+                def __init__(self):
+                    super().__init__()
+                    self.texts: list[str] = []
+                    self._skip = False
+
+                def handle_starttag(self, tag, attrs):
+                    if tag in ("script", "style", "head", "nav", "footer"):
+                        self._skip = True
+
+                def handle_endtag(self, tag):
+                    if tag in ("script", "style", "head", "nav", "footer"):
+                        self._skip = False
+
+                def handle_data(self, data):
+                    if not self._skip and data.strip():
+                        self.texts.append(data.strip())
+
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                resp.raise_for_status()
+
+            extractor = _TextExtractor()
+            extractor.feed(resp.text)
+            raw_text = " ".join(extractor.texts)[:3000]
+
+            if not raw_text.strip():
+                return "페이지 내용을 가져왔지만 텍스트를 추출하지 못했습니다."
+
+            from langchain_core.messages import HumanMessage, SystemMessage
+            try:
+                llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
+                resp_llm = await llm.ainvoke([
+                    SystemMessage(content="주어진 웹페이지 내용을 한국어로 3-5문장으로 요약해줘."),
+                    HumanMessage(content=f"URL: {url}\n\n내용:\n{raw_text}"),
+                ])
+                return f"📄 *URL 요약*\n{resp_llm.content}"
+            except Exception as e:
+                logger.warning("[tool] summarize_url LLM failed: %s", e)
+                return f"📄 *URL 내용 (요약 실패)*\n{raw_text[:500]}..."
+        except Exception as e:
+            logger.warning("[tool] summarize_url failed url=%s: %s", url[:50], e)
+            return f"URL 내용을 가져오지 못했습니다: {e}"
 
     @langchain_tool
     async def add_calendar_event(title: str, date: str, time: str, description: str = "") -> str:
@@ -218,7 +337,7 @@ def _make_tools(user_id: str):
 
     @langchain_tool
     async def list_todos() -> str:
-        """완료되지 않은 할 일 목록을 조회합니다."""
+        """오늘 할 일 목록을 조회합니다."""
         logger.info("[tool] list_todos user=%s", user_id)
         from app.core.database import AsyncSessionLocal
         from app.services import todo_service
@@ -251,9 +370,14 @@ def _make_tools(user_id: str):
             logger.warning("[tool] web_search timeout")
             return "웹 검색 시간 초과."
 
-    return [search_memory, save_memory, add_calendar_event, list_calendar_events,
-            add_expense, get_expense_summary, set_reminder, list_reminders, cancel_reminder,
-            add_todo, list_todos, complete_todo, web_search]
+    return [
+        search_memory, save_memory, get_weather, summarize_url,
+        add_calendar_event, list_calendar_events,
+        add_expense, get_expense_summary,
+        set_reminder, list_reminders, cancel_reminder,
+        add_todo, list_todos, complete_todo,
+        web_search,
+    ]
 
 
 async def _invoke_graph(llm, tools, message: str, timeout: int):
@@ -285,7 +409,28 @@ async def _prefetch_memory(user_id: str, message: str) -> str:
         return message
 
 
-async def chat(user_id: str, message: str) -> str:
+async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -> None:
+    """대화에서 중요 정보를 추출해 자동으로 ChromaDB에 저장한다."""
+    try:
+        prompt = (
+            f"아래 대화에서 나중에 기억해야 할 핵심 정보를 한 줄로 추출해줘.\n"
+            f"이름, 날짜, 선호도, 사실, 연락처 같은 중요한 정보가 있으면 추출하고, 없으면 빈 문자열만 반환해.\n\n"
+            f"사용자: {user_message[:500]}\n"
+            f"비서: {agent_reply[:500]}\n\n"
+            f"핵심 정보 (없으면 빈 문자열):"
+        )
+        llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
+        resp = await asyncio.wait_for(llm.ainvoke(prompt), timeout=10)
+        extracted = (resp.content or "").strip()
+        if extracted and len(extracted) > 5:
+            from app.services import memory_service
+            await memory_service.store_memory(user_id, extracted)
+            logger.info("[agent] auto_save_memory extracted=%r", extracted[:80])
+    except Exception as e:
+        logger.warning("[agent] auto_save_memory failed: %s", e)
+
+
+async def chat(user_id: str, message: str, channel_id: str = "") -> str:
     """Gemini 우선 사용, 할당량 초과 시 Ollama로 자동 전환."""
     logger.info("[agent] chat user=%s message_len=%d", user_id, len(message))
 
@@ -294,7 +439,7 @@ async def chat(user_id: str, message: str) -> str:
     llm_name = settings.gemini_model if use_gemini else settings.ollama_model
     logger.info("[agent] using llm=%s", llm_name)
 
-    tools = _make_tools(user_id)
+    tools = _make_tools(user_id, channel_id)
     augmented_message = await _prefetch_memory(user_id, message)
 
     try:
@@ -318,7 +463,6 @@ async def chat(user_id: str, message: str) -> str:
             logger.warning("[agent] error llm=%s: %s", llm_name, e)
             return "죄송합니다, 오류가 발생했습니다."
 
-    # 응답 추출 (content가 list인 경우 처리)
     def _extract_text(content) -> str:
         if isinstance(content, list):
             return " ".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text")
@@ -340,4 +484,99 @@ async def chat(user_id: str, message: str) -> str:
             reply = "처리가 완료되었습니다."
 
     logger.info("[agent] reply_len=%d", len(reply))
+
+    asyncio.create_task(_auto_save_memory(user_id, message, reply))
+
     return reply
+
+
+async def handle_receipt_image(user_id: str, file_url: str, channel_id: str) -> None:
+    """영수증 사진을 Gemini Vision으로 분석하여 지출 확인 요청을 Slack으로 전송한다."""
+    from app.services import slack_service
+
+    try:
+        import base64
+        import json
+        import re
+
+        import httpx
+        from langchain_core.messages import HumanMessage
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                file_url,
+                headers={"Authorization": f"Bearer {settings.slack_bot_token}"},
+            )
+            resp.raise_for_status()
+            image_bytes = resp.content
+            content_type = resp.headers.get("content-type", "image/jpeg")
+
+        llm = ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.gemini_api_key)
+        b64 = base64.b64encode(image_bytes).decode()
+        msg = HumanMessage(content=[
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{content_type};base64,{b64}"},
+            },
+            {
+                "type": "text",
+                "text": (
+                    '이 영수증에서 가게이름, 총금액(숫자만), 날짜(YYYY-MM-DD)를 JSON으로 추출해줘. '
+                    '예: {"store": "스타벅스", "amount": 6500, "date": "2026-06-15"}. '
+                    '확실하지 않으면 null을 써줘.'
+                ),
+            },
+        ])
+        response = await llm.ainvoke([msg])
+        m = re.search(r'\{[^}]+\}', response.content or "")
+        if not m:
+            await slack_service.send_message(channel_id, "영수증 인식에 실패했습니다. 직접 지출을 입력해주세요.")
+            return
+
+        data = json.loads(m.group())
+        store = data.get("store") or "알 수 없음"
+        amount = data.get("amount")
+        date_str = data.get("date") or ""
+
+        if not amount:
+            await slack_service.send_message(channel_id, "금액을 인식하지 못했습니다. 직접 지출을 입력해주세요.")
+            return
+
+        _pending_expense[user_id] = {
+            "amount": int(amount),
+            "category": store,
+            "memo": f"영수증 ({date_str})" if date_str else "영수증",
+        }
+
+        confirm_text = (
+            f"💳 영수증을 인식했습니다.\n"
+            f"• 가게: {store}\n"
+            f"• 금액: {int(amount):,}원\n"
+            f"• 날짜: {date_str or '오늘'}\n\n기록할까요?"
+        )
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": confirm_text}},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "기록"},
+                        "action_id": "expense_confirm",
+                        "value": user_id,
+                        "style": "primary",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "취소"},
+                        "action_id": "expense_cancel",
+                        "value": user_id,
+                    },
+                ],
+            },
+        ]
+        await slack_service.send_message(channel_id, confirm_text, blocks=blocks)
+    except Exception as e:
+        logger.warning("[agent] handle_receipt_image failed: %s", e)
+        await slack_service.send_message(channel_id, "영수증 처리 중 오류가 발생했습니다.")

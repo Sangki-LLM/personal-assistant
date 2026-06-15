@@ -1,7 +1,7 @@
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -110,3 +110,86 @@ def get_monthly_summary(year_month: str = "") -> str:
     except Exception as e:
         logger.warning("[expense] get_monthly_summary failed: %s", e)
         return f"지출 요약 실패: {e}"
+
+
+def get_weekly_summary() -> str:
+    """지난 7일 카테고리별 지출 합계를 반환한다."""
+    try:
+        today = datetime.now().date()
+        week_ago = today - timedelta(days=7)
+
+        result = _service().spreadsheets().values().get(
+            spreadsheetId=settings.expense_sheet_id,
+            range="A:D",
+        ).execute()
+        rows = result.get("values", [])
+        if len(rows) <= 1:
+            return "지난 7일 지출 내역이 없습니다."
+
+        totals: dict[str, int] = defaultdict(int)
+        grand_total = 0
+        for row in rows[1:]:
+            if len(row) < 3:
+                continue
+            try:
+                row_date = datetime.strptime(row[0], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if not (week_ago <= row_date <= today):
+                continue
+            try:
+                amount = int(str(row[1]).replace(",", ""))
+                totals[row[2]] += amount
+                grand_total += amount
+            except ValueError:
+                continue
+
+        if not totals:
+            return "지난 7일 지출 내역이 없습니다."
+
+        lines = [f"📊 지난 7일 지출 요약 ({week_ago} ~ {today})"]
+        for cat, total in sorted(totals.items(), key=lambda x: -x[1]):
+            lines.append(f"• {cat}: {total:,}원")
+        lines.append(f"합계: {grand_total:,}원")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning("[expense] get_weekly_summary failed: %s", e)
+        return f"주간 지출 요약 실패: {e}"
+
+
+def get_spending_alert() -> str:
+    """이번 달 지출이 저번 달 대비 20% 이상이면 경고 메시지를 반환한다."""
+    try:
+        now = datetime.now()
+        this_month = now.strftime("%Y-%m")
+        last_month = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+        result = _service().spreadsheets().values().get(
+            spreadsheetId=settings.expense_sheet_id,
+            range="A:D",
+        ).execute()
+        rows = result.get("values", [])
+
+        def _sum(prefix: str) -> int:
+            total = 0
+            for row in rows[1:]:
+                if len(row) < 2 or not row[0].startswith(prefix):
+                    continue
+                try:
+                    total += int(str(row[1]).replace(",", ""))
+                except ValueError:
+                    pass
+            return total
+
+        this = _sum(this_month)
+        last = _sum(last_month)
+
+        if last == 0 or this == 0:
+            return ""
+        ratio = (this - last) / last * 100
+        if ratio >= 20:
+            return f"⚠️ 이번 달 지출({this:,}원)이 저번 달({last:,}원)보다 {ratio:.0f}% 많아요!"
+        return ""
+    except Exception as e:
+        logger.warning("[expense] get_spending_alert failed: %s", e)
+        return ""
