@@ -195,7 +195,18 @@ async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
             id_to_doc[doc_id] = all_docs[idx]
 
         sorted_ids = sorted(rrf, key=lambda d: rrf[d], reverse=True)
-        docs = [id_to_doc[doc_id] for doc_id in sorted_ids[:n]]
+        result_ids = list(sorted_ids[:n])
+
+        # BM25 #1 강제 포함: keyword 매칭이 명확한 doc이 vector 편향으로 밀려났을 때 보정
+        # (예: "창공 결혼식" docs가 "결혼" 클러스터로 vector top-k를 점령하는 경우)
+        if bm25_top_idx:
+            best_bm25_id = all_ids[bm25_top_idx[0]]
+            best_bm25_score = bm25_scores[bm25_top_idx[0]]
+            if best_bm25_score > 1.0 and best_bm25_id not in result_ids and best_bm25_id in id_to_doc:
+                result_ids[-1] = best_bm25_id
+                logger.info("[memory] BM25 #1 forced (score=%.2f): %s", best_bm25_score, all_docs[bm25_top_idx[0]][:40])
+
+        docs = [id_to_doc[doc_id] for doc_id in result_ids if doc_id in id_to_doc]
 
         logger.info("[memory] hybrid search user=%s found=%d (vec+bm25 rrf)", user_id, len(docs))
         logger.info("[memory] search results: %s", [d[:50] for d in docs])
