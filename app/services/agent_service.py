@@ -421,7 +421,13 @@ async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -
         )
         llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
         resp = await asyncio.wait_for(llm.ainvoke(prompt), timeout=10)
-        extracted = (resp.content or "").strip()
+        content = resp.content
+        if isinstance(content, list):
+            extracted = " ".join(
+                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+            ).strip()
+        else:
+            extracted = (content or "").strip()
         if extracted and len(extracted) > 5:
             from app.services import memory_service
             await memory_service.store_memory(user_id, extracted)
