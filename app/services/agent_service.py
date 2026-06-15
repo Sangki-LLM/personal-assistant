@@ -53,7 +53,7 @@ def _build_system_prompt() -> str:
 | 일정 조회 요청 | list_calendar_events |
 | 지출·비용·결제 언급 | add_expense |
 | 지출 조회·요약 요청 | get_expense_summary |
-| 알림·리마인더 설정 | set_reminder + add_todo (둘 다 호출) |
+| 알림·리마인더 설정 | set_reminder (add_todo는 호출하지 않음) |
 | 리마인더 목록 조회 | list_reminders |
 | 리마인더 취소 | cancel_reminder |
 | 할 일 추가 | add_todo |
