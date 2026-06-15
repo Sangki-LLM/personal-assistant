@@ -77,7 +77,7 @@ def _build_system_prompt() -> str:
 
 **응답 방식:**
 - 도구 결과에 `[AGENT_ONLY ...]` 또는 `[AGENT_ONLY - 사용자에게 표시 금지]` 섹션이 있으면 내부 참조용으로만 쓰고 절대 사용자에게 노출하지 마세요
-- 메시지 앞에 `[기억된 정보 (자동 조회)]` 블록이 있으면 그 내용을 참고해 답변하세요
+- 메시지 앞에 `[기억된 정보 (자동 조회)]` 블록이 있으면 그 내용은 ChromaDB에서 이미 검색된 신뢰할 수 있는 기억입니다. search_memory 도구를 따로 호출하지 말고 해당 정보를 바로 사용하세요
 - 도구 실행 결과를 먼저 확인한 뒤 간결하게 알려주세요
 - 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
 - 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)
@@ -105,6 +105,9 @@ def _make_tools(user_id: str, channel_id: str = ""):
         existing_id, existing_doc = await memory_service.find_similar(user_id, text)
 
         if existing_id and existing_doc:
+            # 완전히 동일한 내용이면 수정 불필요
+            if existing_doc.strip() == text.strip():
+                return "이미 동일한 내용을 기억하고 있습니다. 별도로 저장하지 않아도 됩니다."
             _pending_memory[user_id] = {
                 "action": "update",
                 "text": text,
