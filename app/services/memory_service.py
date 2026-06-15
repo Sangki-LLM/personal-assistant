@@ -136,7 +136,11 @@ async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]
 
 
 def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
+    tokens = re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
+    # 한국어 단어를 음절 단위로 추가 분해 (형태소 분석기 없이 복합어 대응)
+    # "내차가" → ["내", "차", "가"] 개별 음절도 토큰으로 추가
+    korean_chars = re.findall(r"[가-힣]", text)
+    return tokens + korean_chars
 
 
 async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
