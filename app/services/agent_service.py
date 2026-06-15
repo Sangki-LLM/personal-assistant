@@ -43,6 +43,11 @@ def _build_system_prompt() -> str:
     today = date.today().isoformat()
     return f"""당신은 유능한 개인 비서입니다. 오늘 날짜: {today}. 항상 한국어로 답변하세요.
 
+**⛔ 절대 금지 — 리마인더와 할 일 혼용:**
+- 사용자가 "알림 설정해줘", "리마인더 설정해줘" 라고 하면 → `set_reminder`만 호출
+- `add_todo`를 함께 호출하면 절대 안 됩니다
+- 사용자가 "할일에도 추가해줘", "todo에도 넣어줘"라고 명시적으로 말할 때만 `add_todo` 추가 호출
+
 **도구 호출 규칙 — 반드시 준수:**
 
 | 상황 | 호출할 도구 |
@@ -53,10 +58,10 @@ def _build_system_prompt() -> str:
 | 일정 조회 요청 | list_calendar_events |
 | 지출·비용·결제 언급 | add_expense |
 | 지출 조회·요약 요청 | get_expense_summary |
-| 알림·리마인더 설정 | set_reminder (add_todo는 호출하지 않음) |
+| 알림·리마인더 설정 | set_reminder 단독 호출 (add_todo 금지) |
 | 리마인더 목록 조회 | list_reminders |
 | 리마인더 취소 | cancel_reminder |
-| 할 일 추가 | add_todo |
+| 할 일 추가 (명시적 요청 시에만) | add_todo |
 | 할 일 목록 조회 | list_todos |
 | 할 일 완료 처리 | complete_todo |
 | 과거 대화·정보 질문 | search_memory |
@@ -424,7 +429,7 @@ async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -
             f"비서: {agent_reply[:500]}\n\n정보:"
         )
         llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
-        resp = await asyncio.wait_for(llm.ainvoke(prompt), timeout=10)
+        resp = await asyncio.wait_for(llm.ainvoke(prompt), timeout=20)
         content = resp.content
         if isinstance(content, list):
             extracted = " ".join(
@@ -434,19 +439,21 @@ async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -
             extracted = (content or "").strip()
         # LLM이 프롬프트 prefix를 붙여 반환하는 경우 제거
         extracted = _re.sub(r'^(정보:?|사실:?|핵심\s*정보[^:]*:?)\s*', '', extracted).strip()
-        # 무의미한 응답 필터 (없음, null, N/A, 내용 없음 등)
+        # 무의미한 응답 필터 (없음, null, N/A, 내용 없음, 오류 관련 등)
         _EMPTY = _re.compile(
-            r'^[\(\[\s]*(없음|없어|없다|null|n/a|해당\s*없음|정보\s*없음|내용\s*없음|빈\s*문자열|없습니다|저장\s*불필요)[\)\]\s\.]*$',
+            r'^[\(\[\s]*(없음|없어|없다|null|n/a|해당\s*없음|정보\s*없음|내용\s*없음|빈\s*문자열|없습니다|저장\s*불필요|오류|error)[\)\]\s\?\.]*$',
             _re.IGNORECASE,
         )
         if not extracted or len(extracted) <= 5 or _EMPTY.match(extracted):
-            logger.debug("[agent] auto_save_memory skipped: empty or meaningless")
+            logger.debug("[agent] auto_save_memory skipped: empty or meaningless (%r)", extracted[:30])
             return
         from app.services import memory_service
         await memory_service.store_memory(user_id, extracted)
         logger.info("[agent] auto_save_memory extracted=%r", extracted[:80])
+    except asyncio.TimeoutError:
+        logger.warning("[agent] auto_save_memory timeout (20s)")
     except Exception as e:
-        logger.warning("[agent] auto_save_memory failed: %s", e)
+        logger.warning("[agent] auto_save_memory failed (%s): %s", type(e).__name__, e)
 
 
 async def chat(user_id: str, message: str, channel_id: str = "") -> str:
