@@ -434,10 +434,17 @@ async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -
             extracted = (content or "").strip()
         # LLM이 프롬프트 prefix를 붙여 반환하는 경우 제거
         extracted = _re.sub(r'^(정보:?|사실:?|핵심\s*정보[^:]*:?)\s*', '', extracted).strip()
-        if extracted and len(extracted) > 5:
-            from app.services import memory_service
-            await memory_service.store_memory(user_id, extracted)
-            logger.info("[agent] auto_save_memory extracted=%r", extracted[:80])
+        # 무의미한 응답 필터 (없음, null, N/A, 내용 없음 등)
+        _EMPTY = _re.compile(
+            r'^[\(\[\s]*(없음|없어|없다|null|n/a|해당\s*없음|정보\s*없음|내용\s*없음|빈\s*문자열|없습니다|저장\s*불필요)[\)\]\s\.]*$',
+            _re.IGNORECASE,
+        )
+        if not extracted or len(extracted) <= 5 or _EMPTY.match(extracted):
+            logger.debug("[agent] auto_save_memory skipped: empty or meaningless")
+            return
+        from app.services import memory_service
+        await memory_service.store_memory(user_id, extracted)
+        logger.info("[agent] auto_save_memory extracted=%r", extracted[:80])
     except Exception as e:
         logger.warning("[agent] auto_save_memory failed: %s", e)
 

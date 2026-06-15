@@ -55,3 +55,11 @@ async def health():
         "model": settings.ollama_model,
         "ollama_host": settings.ollama_host,
     }
+
+
+@app.post("/admin/memory/purge/{user_id}")
+async def purge_memory(user_id: str):
+    """오염된 ChromaDB 기억을 정리한다. (관리용)"""
+    from app.services import memory_service
+    deleted = await memory_service.purge_junk_memories(user_id)
+    return {"deleted": deleted, "user_id": user_id}

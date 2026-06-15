@@ -86,6 +86,34 @@ async def store_memory(user_id: str, text: str) -> None:
         logger.warning("[memory] store failed: %s", e)
 
 
+_JUNK_PATTERNS = re.compile(
+    r'(핵심\s*정보[^:]*:|없으면\s*빈\s*문자열|내용\s*없음|없음$|없습니다$|\(내용\s*없음\))',
+    re.IGNORECASE,
+)
+
+
+async def purge_junk_memories(user_id: str) -> int:
+    """오염된 기억(prefix 포함, 무의미한 내용)을 ChromaDB에서 삭제하고 삭제 건수를 반환한다."""
+    try:
+        col = _collection(user_id)
+        count = col.count()
+        if count == 0:
+            return 0
+        all_data = col.get(limit=min(count, 2000), include=["documents"])
+        junk_ids = [
+            doc_id
+            for doc_id, doc in zip(all_data["ids"], all_data["documents"])
+            if _JUNK_PATTERNS.search(doc) or len(doc.strip()) <= 5
+        ]
+        if junk_ids:
+            col.delete(ids=junk_ids)
+            logger.info("[memory] purged %d junk docs user=%s", len(junk_ids), user_id)
+        return len(junk_ids)
+    except Exception as e:
+        logger.warning("[memory] purge_junk failed: %s", e)
+        return 0
+
+
 async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]:
     """유사한 기억이 있으면 (existing_id, existing_doc) 반환, 없으면 (None, None)."""
     try:
