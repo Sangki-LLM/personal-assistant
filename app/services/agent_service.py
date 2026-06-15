@@ -98,10 +98,14 @@ def _make_tools(user_id: str, channel_id: str = ""):
         logger.info("[tool] search_memory user=%s query=%s", user_id, query[:50])
         from app.services import memory_service
         results = await memory_service.search_memory(user_id, query)
-        logger.info("[tool] search_memory done count=%d", len(results))
+        logger.info("[tool] search_memory done count=%d docs=%s", len(results), [r[:40] for r in results])
         if not results:
             return "관련 기억이 없습니다."
-        return "\n---\n".join(results)
+        body = "\n---\n".join(results)
+        return (
+            f"[기억 검색 완료 — 아래 내용이 실제 저장된 사실입니다. 반드시 이 내용을 바탕으로 답변하세요]\n"
+            f"{body}"
+        )
 
     @langchain_tool
     async def save_memory(text: str) -> str:
@@ -413,7 +417,12 @@ async def _prefetch_memory(user_id: str, message: str) -> str:
             return message
         context = "\n".join(f"- {m}" for m in memories)
         logger.info("[agent] prefetch_memory found=%d", len(memories))
-        return f"[기억된 정보 (자동 조회)]\n{context}\n\n[사용자 메시지]\n{message}"
+        return (
+            f"[⚠️ 사전 검색된 기억 — 아래 내용은 ChromaDB에 저장된 사실 정보입니다]\n"
+            f"{context}\n"
+            f"[주의] 위 기억에 답이 있으면 search_memory를 재호출하지 말고 바로 답변하세요.\n\n"
+            f"[사용자 메시지]\n{message}"
+        )
     except Exception as e:
         logger.warning("[agent] prefetch_memory failed: %s", e)
         return message

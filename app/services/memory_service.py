@@ -193,6 +193,7 @@ async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
         docs = [id_to_doc[doc_id] for doc_id in sorted_ids[:n]]
 
         logger.info("[memory] hybrid search user=%s found=%d (vec+bm25 rrf)", user_id, len(docs))
+        logger.info("[memory] search results: %s", [d[:50] for d in docs])
         return docs
     except Exception as e:
         logger.warning("[memory] search failed: %s", e)
