@@ -91,6 +91,14 @@ _JUNK_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# 실시간 데이터 패턴 (주가, 환율, 지수 등 시세 정보는 저장 금지)
+_REALTIME_PATTERNS = re.compile(
+    r'(주가\s*[:：]|코스피|코스닥|나스닥|s&p|환율\s*[:：]|달러\s*[:：]|원\s*/\s*달러|'
+    r'비트코인|이더리움|코인\s*가격|주식\s*가격|지수\s*[:：]|포인트\s*$|'
+    r'\d+\s*(달러|원|엔|유로|위안)\s*$)',
+    re.IGNORECASE,
+)
+
 
 async def purge_junk_memories(user_id: str) -> int:
     """오염된 기억(prefix 포함, 무의미한 내용)을 ChromaDB에서 삭제하고 삭제 건수를 반환한다."""
@@ -103,7 +111,7 @@ async def purge_junk_memories(user_id: str) -> int:
         junk_ids = [
             doc_id
             for doc_id, doc in zip(all_data["ids"], all_data["documents"])
-            if _JUNK_PATTERNS.search(doc) or len(doc.strip()) <= 5
+            if _JUNK_PATTERNS.search(doc) or _REALTIME_PATTERNS.search(doc) or len(doc.strip()) <= 5
         ]
         if junk_ids:
             col.delete(ids=junk_ids)
