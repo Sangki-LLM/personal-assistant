@@ -137,10 +137,15 @@ async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]
 
 def _tokenize(text: str) -> list[str]:
     tokens = re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
-    # 한국어 단어를 음절 단위로 추가 분해 (형태소 분석기 없이 복합어 대응)
-    # "내차가" → ["내", "차", "가"] 개별 음절도 토큰으로 추가
-    korean_chars = re.findall(r"[가-힣]", text)
-    return tokens + korean_chars
+    korean_words = re.findall(r"[가-힣]+", text)
+    extra: list[str] = []
+    for word in korean_words:
+        # 2-gram: 복합어 분해 ("결혼정장" → "결혼","혼정","정장", 조사 분리 "업체가" → "업체")
+        for i in range(len(word) - 1):
+            extra.append(word[i : i + 2])
+        # 단일 음절: 1자 검색 대응 ("내차가" → "차" 매칭)
+        extra.extend(list(word))
+    return tokens + extra
 
 
 async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
@@ -153,7 +158,7 @@ async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
         if count == 0:
             return []
 
-        candidates = min(max(n * 2, 5), count)
+        candidates = min(max(n * 4, 10), count)
 
         # --- 벡터 검색 ---
         embeddings = await _embed([query[:2000]])
