@@ -78,6 +78,7 @@ def _build_system_prompt() -> str:
 **응답 방식:**
 - 도구 결과에 `[AGENT_ONLY ...]` 또는 `[AGENT_ONLY - 사용자에게 표시 금지]` 섹션이 있으면 내부 참조용으로만 쓰고 절대 사용자에게 노출하지 마세요
 - 메시지 앞에 `[기억된 정보 (자동 조회)]` 블록이 있으면 그 내용은 ChromaDB에서 이미 검색된 신뢰할 수 있는 기억입니다. search_memory 도구를 따로 호출하지 말고 해당 정보를 바로 사용하세요
+- search_memory 도구 결과가 반환되면 그 내용을 **반드시 신뢰**하고 "없다"고 하지 마세요. 형식이 어색해도 내용 안에 답이 있으면 답변하세요
 - 도구 실행 결과를 먼저 확인한 뒤 간결하게 알려주세요
 - 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
 - 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)
@@ -414,13 +415,13 @@ async def _prefetch_memory(user_id: str, message: str) -> str:
 
 async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -> None:
     """대화에서 중요 정보를 추출해 자동으로 ChromaDB에 저장한다."""
+    import re as _re
     try:
         prompt = (
-            f"아래 대화에서 나중에 기억해야 할 핵심 정보를 한 줄로 추출해줘.\n"
-            f"이름, 날짜, 선호도, 사실, 연락처 같은 중요한 정보가 있으면 추출하고, 없으면 빈 문자열만 반환해.\n\n"
+            f"다음 대화에서 나중에 참고할 사실 정보가 있으면 '주어: 정보' 형태로 한 줄만 써줘. "
+            f"사실 정보가 없으면 아무것도 쓰지 마. 설명이나 prefix 없이 정보만 써줘.\n\n"
             f"사용자: {user_message[:500]}\n"
-            f"비서: {agent_reply[:500]}\n\n"
-            f"핵심 정보 (없으면 빈 문자열):"
+            f"비서: {agent_reply[:500]}\n\n정보:"
         )
         llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
         resp = await asyncio.wait_for(llm.ainvoke(prompt), timeout=10)
@@ -431,6 +432,8 @@ async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -
             ).strip()
         else:
             extracted = (content or "").strip()
+        # LLM이 프롬프트 prefix를 붙여 반환하는 경우 제거
+        extracted = _re.sub(r'^(정보:?|사실:?|핵심\s*정보[^:]*:?)\s*', '', extracted).strip()
         if extracted and len(extracted) > 5:
             from app.services import memory_service
             await memory_service.store_memory(user_id, extracted)
