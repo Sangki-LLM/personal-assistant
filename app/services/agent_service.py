@@ -532,8 +532,6 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
 
     logger.info("[agent] reply_len=%d", len(reply))
 
-    asyncio.create_task(_auto_save_memory(user_id, message, reply))
-
     return reply
 
 
