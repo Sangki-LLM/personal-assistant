@@ -197,12 +197,17 @@ async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
         sorted_ids = sorted(rrf, key=lambda d: rrf[d], reverse=True)
         result_ids = list(sorted_ids[:n])
 
-        # BM25 #1 강제 포함: keyword 매칭이 명확한 doc이 vector 편향으로 밀려났을 때 보정
-        # (예: "창공 결혼식" docs가 "결혼" 클러스터로 vector top-k를 점령하는 경우)
+        # BM25 top-3 진단 로그 (vector 편향 분석용)
         if bm25_top_idx:
+            logger.info(
+                "[memory] BM25 top-3: %s",
+                [(all_docs[idx][:35], round(bm25_scores[idx], 3)) for idx in bm25_top_idx[:3]],
+            )
+
             best_bm25_id = all_ids[bm25_top_idx[0]]
             best_bm25_score = bm25_scores[bm25_top_idx[0]]
-            if best_bm25_score > 1.0 and best_bm25_id not in result_ids and best_bm25_id in id_to_doc:
+            # score > 0 이면 BM25 #1을 결과에 강제 포함 (vector 편향 보정, 임계값 제거)
+            if best_bm25_score > 0 and best_bm25_id not in result_ids and best_bm25_id in id_to_doc:
                 result_ids[-1] = best_bm25_id
                 logger.info("[memory] BM25 #1 forced (score=%.2f): %s", best_bm25_score, all_docs[bm25_top_idx[0]][:40])
 
