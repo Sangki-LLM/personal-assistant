@@ -112,8 +112,8 @@ async def _summarize_site(site_url: str) -> str:
     if not links:
         return f"⚠️ {site_url} 에서 기사를 가져올 수 없었습니다."
 
-    # 상위 후보 15개만 본문 병렬 fetch
-    candidates = links[:15]
+    # 상위 후보 10개만 본문 병렬 fetch
+    candidates = links[:10]
     async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True) as client:
         bodies = await asyncio.gather(
             *[_fetch_article_body(client, href) for _, href in candidates],
@@ -124,7 +124,7 @@ async def _summarize_site(site_url: str) -> str:
     articles_text = ""
     for i, ((title, href), body) in enumerate(zip(candidates, bodies), 1):
         body_str = body if isinstance(body, str) else ""
-        articles_text += f"\n[{i}] 제목: {title}\nURL: {href}\n본문 앞부분: {body_str[:500]}\n"
+        articles_text += f"\n[{i}] 제목: {title}\nURL: {href}\n내용: {body_str[:300]}\n"
 
     prompt = (
         f"다음은 뉴스 사이트({site_url})에서 수집한 기사 목록입니다.\n"
