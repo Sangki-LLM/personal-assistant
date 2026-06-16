@@ -31,5 +31,8 @@ class Settings(BaseSettings):
     google_calendar_id: str = "primary"  # 사용자 캘린더 ID (Gmail 주소 권장)
     expense_sheet_id: str = ""
 
+    # 뉴스 브리핑 (쉼표 구분 URL 목록)
+    news_urls: str = ""
+
 
 settings = Settings()

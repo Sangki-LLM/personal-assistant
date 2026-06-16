@@ -122,13 +122,20 @@ async def _send_weekly_report() -> None:
     logger.info("[briefing] weekly report sent to user=%s", settings.slack_my_user_id)
 
 
+async def _send_news_briefing() -> None:
+    from app.services import news_service
+    await news_service.send_news_briefing()
+
+
 def start_briefing_scheduler() -> None:
     global _scheduler
     _scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
     _scheduler.add_job(_send_morning_briefing, "cron", hour=9, minute=0)
     _scheduler.add_job(_send_weekly_report, "cron", day_of_week="mon", hour=9, minute=0)
+    _scheduler.add_job(_send_news_briefing, "cron", hour=9, minute=5)
+    _scheduler.add_job(_send_news_briefing, "cron", hour=19, minute=0)
     _scheduler.start()
-    logger.info("[briefing] scheduler started (daily 09:00, weekly Mon 09:00)")
+    logger.info("[briefing] scheduler started (daily 09:00, news 09:05/19:00, weekly Mon 09:00)")
 
 
 def stop_briefing_scheduler() -> None:
