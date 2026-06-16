@@ -81,6 +81,14 @@ async def list_memory(user_id: str, limit: int = 100):
     return {"count": count, "docs": items}
 
 
+@app.post("/admin/news/send")
+async def trigger_news_briefing():
+    """뉴스 브리핑을 즉시 실행한다. (관리용)"""
+    from app.services import news_service
+    await news_service.send_news_briefing()
+    return {"ok": True}
+
+
 @app.delete("/admin/memory/{user_id}/{doc_id}")
 async def delete_memory(user_id: str, doc_id: str):
     """특정 기억을 ChromaDB에서 삭제한다. (관리용)"""
