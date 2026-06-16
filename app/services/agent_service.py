@@ -71,6 +71,7 @@ def _build_system_prompt() -> str:
 | 할 일 완료 처리 | complete_todo |
 | 과거 대화·정보 질문 | search_memory |
 | 사용자 개인 정보 질문 ("내 ~~이 뭐야", "~~이 언제야") | search_memory |
+| 특정 사람·장소·사물 관련 속성 조회 ("또리 생일", "김철수 전화") | query_knowledge_graph(entity=이름) |
 | 날씨 질문 ("~~ 날씨", "날씨 어때") | get_weather(location=지역명) |
 | URL이 포함된 메시지 | summarize_url |
 | 최신 정보·검색 필요 | web_search |
@@ -373,6 +374,16 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return await todo_service.complete_todo(db, user_id, todo_id)
 
     @langchain_tool
+    async def query_knowledge_graph(entity: str) -> str:
+        """특정 사람·장소·사물에 대해 Knowledge Graph에서 속성과 관계를 조회합니다. 예: '또리', '김철수'"""
+        logger.info("[tool] query_knowledge_graph entity=%s", entity)
+        from app.services import graph_service
+        results = graph_service.query_graph(user_id, entity)
+        if not results:
+            return f"'{entity}'에 대한 Knowledge Graph 정보가 없습니다."
+        return f"[Knowledge Graph: {entity}]\n" + "\n".join(results)
+
+    @langchain_tool
     async def web_search(query: str) -> str:
         """인터넷에서 최신 정보를 검색합니다. LLM이 모르는 최신 정보나 뉴스를 찾을 때 사용하세요."""
         logger.info("[tool] web_search query=%s", query[:50])
@@ -390,7 +401,7 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return "웹 검색 시간 초과."
 
     return [
-        search_memory, save_memory, get_weather, summarize_url,
+        search_memory, save_memory, query_knowledge_graph, get_weather, summarize_url,
         add_calendar_event, list_calendar_events,
         add_expense, get_expense_summary,
         set_reminder, list_reminders, cancel_reminder,
