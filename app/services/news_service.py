@@ -151,10 +151,13 @@ async def _summarize_site(site_url: str) -> str:
             content = " ".join(b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text")
         else:
             content = str(raw or "")
-        return content.strip()
+        content = content.strip()
+        logger.info("[news] LLM response len=%d preview=%r", len(content), content[:80])
+        if not content:
+            raise ValueError("LLM returned empty content")
+        return content
     except Exception as e:
-        logger.warning("[news] LLM failed: %s", e)
-        # LLM 실패 시 제목+URL만 나열
+        logger.warning("[news] LLM failed or empty: %s — falling back to title list", e)
         fallback = "\n".join(f"• {t}\n  🔗 {h}" for t, h in candidates[:10])
         return f"(요약 실패 — 제목만 표시)\n{fallback}"
 
@@ -167,6 +170,7 @@ async def send_news_briefing() -> None:
         return
 
     urls = [u.strip() for u in settings.news_urls.split(",") if u.strip()]
+    logger.info("[news] news_urls raw=%r parsed=%d sites", settings.news_urls[:100], len(urls))
     if not urls:
         logger.info("[news] no news_urls configured, skipping")
         return
