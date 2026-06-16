@@ -69,7 +69,7 @@ async def purge_memory(user_id: str):
 async def list_memory(user_id: str, limit: int = 100):
     """ChromaDB에 저장된 전체 기억 목록을 반환한다. (관리용)"""
     from app.services import memory_service
-    col = memory_service._collection(user_id)
+    col = memory_service._raw_collection(user_id)
     count = col.count()
     if count == 0:
         return {"count": 0, "docs": []}
@@ -85,6 +85,6 @@ async def list_memory(user_id: str, limit: int = 100):
 async def delete_memory(user_id: str, doc_id: str):
     """특정 기억을 ChromaDB에서 삭제한다. (관리용)"""
     from app.services import memory_service
-    col = memory_service._collection(user_id)
+    col = memory_service._raw_collection(user_id)
     col.delete(ids=[doc_id])
     return {"deleted": doc_id, "user_id": user_id}

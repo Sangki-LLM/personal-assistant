@@ -55,7 +55,12 @@ async def _extract_triplets(text: str) -> list[dict]:
             llm = ChatOllama(model=settings.ollama_model, base_url=settings.ollama_host, think=False)
 
         resp = await asyncio.wait_for(llm.ainvoke([HumanMessage(content=prompt)]), timeout=15)
-        content = (resp.content or "").strip()
+        raw = resp.content
+        if isinstance(raw, list):
+            content = " ".join(b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text")
+        else:
+            content = (raw or "")
+        content = content.strip()
         m = re.search(r"\[.*\]", content, re.DOTALL)
         if m:
             return json.loads(m.group())
