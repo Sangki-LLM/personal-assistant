@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 _pending_memory: dict[str, dict] = {}
 # 확인 대기 중인 지출 기록 요청: user_id → {amount, category, memo}
 _pending_expense: dict[str, dict] = {}
+# 대화 히스토리: user_id → [(user_msg, assistant_reply), ...]
+_chat_histories: dict[str, list[tuple[str, str]]] = {}
+
+_MAX_HISTORY_TURNS = 5   # 이 이상이면 오래된 대화 압축
+_KEEP_RECENT_TURNS = 3   # 최근 N턴은 원문 그대로 유지
 
 
 def _is_quota_error(e: Exception) -> bool:
@@ -405,6 +410,43 @@ async def _invoke_graph(llm, tools, message: str, timeout: int):
     )
 
 
+async def _get_history_context(user_id: str) -> str:
+    """대화 히스토리를 반환한다. 5턴 초과 시 오래된 대화를 LLM으로 요약해 압축한다."""
+    history = _chat_histories.get(user_id, [])
+    if not history:
+        return ""
+
+    if len(history) <= _MAX_HISTORY_TURNS:
+        lines = [f"사용자: {u}\n비서: {a}" for u, a in history]
+        return "[이전 대화]\n" + "\n\n".join(lines) + "\n"
+
+    # 오래된 대화 요약 + 최근 N턴 원문 유지
+    old = history[:-_KEEP_RECENT_TURNS]
+    recent = history[-_KEEP_RECENT_TURNS:]
+    old_text = "\n".join(f"사용자: {u}\n비서: {a}" for u, a in old)
+    try:
+        llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
+        resp = await asyncio.wait_for(
+            llm.ainvoke(
+                f"다음 대화를 핵심 사실 위주로 2-3문장으로 요약해줘. 한국어로.\n\n{old_text}"
+            ),
+            timeout=15,
+        )
+        summary = (resp.content or "").strip()
+        # 히스토리를 요약 1개 + 최근 N턴으로 교체
+        _chat_histories[user_id] = [("(이전 대화 요약)", summary)] + list(recent)
+        logger.info("[agent] history compressed old=%d turns", len(old))
+    except Exception as e:
+        logger.warning("[agent] history compress failed: %s", e)
+        summary = "(이전 대화 요약 실패)"
+
+    recent_lines = [f"사용자: {u}\n비서: {a}" for u, a in recent]
+    return (
+        f"[이전 대화 요약]\n{summary}\n\n"
+        f"[최근 대화]\n" + "\n\n".join(recent_lines) + "\n"
+    )
+
+
 async def _prefetch_memory(user_id: str, message: str) -> str:
     """메시지에 관련 기억을 미리 검색해서 컨텍스트로 주입한다."""
     try:
@@ -487,7 +529,10 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
     logger.info("[agent] using llm=%s", llm_name)
 
     tools = _make_tools(user_id, channel_id)
+    history_context = await _get_history_context(user_id)
     augmented_message = await _prefetch_memory(user_id, message)
+    if history_context:
+        augmented_message = history_context + "\n" + augmented_message
 
     try:
         result = await _invoke_graph(llm, tools, augmented_message, timeout=120)
@@ -540,6 +585,11 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
         return ""
 
     logger.info("[agent] reply_len=%d", len(reply))
+
+    # 대화 히스토리 저장
+    if reply.strip():
+        history = _chat_histories.setdefault(user_id, [])
+        history.append((message[:500], reply[:500]))
 
     return reply
 
