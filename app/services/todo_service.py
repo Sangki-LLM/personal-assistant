@@ -38,20 +38,27 @@ async def list_todos(db: AsyncSession, user_id: str) -> str:
         return "등록된 할 일이 없습니다."
 
     today = date.today()
+
+    # 날짜별 그룹핑
+    from collections import defaultdict
+    groups: dict[str, list[Todo]] = defaultdict(list)
+    for t in todos:
+        if t.due_date is None:
+            groups["날짜 미정"].append(t)
+        elif t.due_date < today:
+            groups[f"⚠️ 기한 초과 — {t.due_date}"].append(t)
+        elif t.due_date == today:
+            groups[f"오늘 — {t.due_date}"].append(t)
+        else:
+            groups[str(t.due_date)].append(t)
+
     display = ["*할 일 목록*"]
     refs = []
-    for t in todos:
-        if t.due_date:
-            if t.due_date < today:
-                date_label = f"⚠️ {t.due_date} (기한 초과)"
-            elif t.due_date == today:
-                date_label = f"📅 오늘 ({t.due_date})"
-            else:
-                date_label = f"📅 {t.due_date}"
-        else:
-            date_label = "날짜 없음"
-        display.append(f"⬜ {t.content} — {date_label}")
-        refs.append(f"id={t.id}: {t.content}")
+    for label, items in groups.items():
+        display.append(f"\n*{label}*")
+        for t in items:
+            display.append(f"⬜ {t.content}")
+            refs.append(f"id={t.id}: {t.content}")
 
     display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
     return "\n".join(display)
