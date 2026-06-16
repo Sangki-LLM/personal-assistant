@@ -58,17 +58,6 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     if not text:
         return
 
-    # 메모리 저장 대기 중이면 예/아니오 처리
-    if user_id in agent_service._pending_memory:
-        pending = agent_service._pending_memory.pop(user_id)
-        if text in _YES:
-            from app.services import memory_service
-            await memory_service.store_memory(user_id, pending["text"])
-            await slack_service.send_message(channel_id, "✅ 기억했습니다!")
-        else:
-            await slack_service.send_message(channel_id, "취소했습니다.")
-        return
-
     # 지출 기록 대기 중이면 예/아니오 처리
     if user_id in agent_service._pending_expense:
         pending = agent_service._pending_expense.pop(user_id)
@@ -140,20 +129,7 @@ async def slack_actions(request: Request):
 
     logger.info("[slack/actions] action_id=%s user_id=%s", action_id, user_id)
 
-    if action_id == "memory_confirm":
-        pending = agent_service._pending_memory.pop(user_id, None)
-        if pending:
-            from app.services import memory_service
-            await memory_service.store_memory(user_id, pending["text"])
-            await slack_service.send_message(channel_id, "✅ 기억했습니다!")
-        else:
-            await slack_service.send_message(channel_id, "이미 처리된 요청입니다.")
-
-    elif action_id == "memory_cancel":
-        agent_service._pending_memory.pop(user_id, None)
-        await slack_service.send_message(channel_id, "취소했습니다.")
-
-    elif action_id == "expense_confirm":
+    if action_id == "expense_confirm":
         pending = agent_service._pending_expense.pop(user_id, None)
         if pending:
             from app.services import expense_service

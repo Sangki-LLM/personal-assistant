@@ -14,8 +14,6 @@ warnings.filterwarnings("ignore", category=ResourceWarning)
 
 logger = logging.getLogger(__name__)
 
-# 확인 대기 중인 메모리 저장 요청: user_id → {action, text, existing_id, existing_doc}
-_pending_memory: dict[str, dict] = {}
 # 확인 대기 중인 지출 기록 요청: user_id → {amount, category, memo}
 _pending_expense: dict[str, dict] = {}
 # 대화 히스토리: user_id → [(user_msg, assistant_reply), ...]
@@ -94,7 +92,7 @@ def _build_system_prompt() -> str:
 - 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
 - 도구 없이 텍스트만 답변하지 마세요 (기억·기록이 필요한 요청은 반드시 도구 호출)
 - `list_todos` 결과는 ✅/⬜ 체크 표시를 *반드시* 포함하여 출력하세요 — `• 항목` 형태로 재포맷 금지, 완료 여부를 항상 표시
-- save_memory 도구를 호출하면 Slack 버튼으로 확인 요청이 전송됩니다. 추가 행동 없이 기다리세요."""
+- save_memory 도구를 호출하면 즉시 저장됩니다. 저장 완료 후 간결하게 "기억했습니다" 형식으로 알려주세요."""
 
 
 def _make_tools(user_id: str, channel_id: str = ""):
@@ -115,66 +113,16 @@ def _make_tools(user_id: str, channel_id: str = ""):
 
     @langchain_tool
     async def save_memory(text: str) -> str:
-        """중요한 정보를 기억합니다. 사용자 확인 후 저장됩니다."""
+        """중요한 정보를 즉시 기억합니다."""
         logger.info("[tool] save_memory user=%s text_len=%d", user_id, len(text))
-        from app.services import memory_service, slack_service
+        from app.services import memory_service
 
         existing_id, existing_doc = await memory_service.find_similar(user_id, text)
+        if existing_id and existing_doc and existing_doc.strip() == text.strip():
+            return "이미 동일한 내용을 기억하고 있습니다."
 
-        if existing_id and existing_doc:
-            # 완전히 동일한 내용이면 수정 불필요
-            if existing_doc.strip() == text.strip():
-                return "이미 동일한 내용을 기억하고 있습니다. 별도로 저장하지 않아도 됩니다."
-            _pending_memory[user_id] = {
-                "action": "update",
-                "text": text,
-                "existing_id": existing_id,
-                "existing_doc": existing_doc,
-            }
-            confirm_text = (
-                f"🔄 기존 기억을 수정할게요.\n"
-                f"• 기존: _{existing_doc[:100]}_\n"
-                f"• 수정: _{text[:100]}_\n맞나요?"
-            )
-        else:
-            _pending_memory[user_id] = {
-                "action": "new",
-                "text": text,
-                "existing_id": None,
-                "existing_doc": None,
-            }
-            confirm_text = f"💾 이렇게 기억할게요: _{text[:150]}_\n맞나요?"
-
-        if channel_id:
-            blocks = [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": confirm_text},
-                },
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "예"},
-                            "action_id": "memory_confirm",
-                            "value": user_id,
-                            "style": "primary",
-                        },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "아니오"},
-                            "action_id": "memory_cancel",
-                            "value": user_id,
-                        },
-                    ],
-                },
-            ]
-            await slack_service.send_message(channel_id, confirm_text, blocks=blocks)
-            return "사용자에게 확인을 요청했습니다. 버튼 응답을 기다립니다."
-        else:
-            await memory_service.store_memory(user_id, text)
-            return "기억했습니다."
+        await memory_service.store_memory(user_id, text)
+        return "기억했습니다."
 
     @langchain_tool
     async def get_weather(location: str) -> str:
@@ -585,15 +533,6 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
                 break
         else:
             reply = "처리가 완료되었습니다."
-
-    # save_memory 단독 호출 시 LLM 해설 메시지 억제 (Block Kit이 이미 전송됨)
-    tools_called = {
-        tc.get("name", "")
-        for msg in result["messages"]
-        for tc in getattr(msg, "tool_calls", [])
-    }
-    if tools_called == {"save_memory"}:
-        return ""
 
     logger.info("[agent] reply_len=%d", len(reply))
 
