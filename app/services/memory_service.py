@@ -159,7 +159,7 @@ async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
         vector_retriever = index.as_retriever(similarity_top_k=candidates)
 
         # BM25 리트리버 — ChromaDB에서 전체 텍스트 가져와 초기화
-        all_data = col.get(limit=min(count, 2000), include=["documents", "ids"])
+        all_data = col.get(limit=min(count, 2000), include=["documents"])
         bm25_nodes = [
             TextNode(id_=doc_id, text=doc)
             for doc_id, doc in zip(all_data["ids"], all_data["documents"])
