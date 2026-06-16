@@ -494,7 +494,8 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
         augmented_message = history_context + "\n" + augmented_message
 
     try:
-        result = await _invoke_graph(llm, tools, augmented_message, timeout=120)
+        timeout = 300 if not use_gemini else 120
+        result = await _invoke_graph(llm, tools, augmented_message, timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning("[agent] timeout llm=%s", llm_name)
         return "죄송합니다, 응답 시간이 초과되었습니다. 다시 시도해 주세요."
