@@ -3,13 +3,26 @@ import re
 import time
 
 import chromadb
-import httpx
+from llama_index.core import Document, Settings as LlamaSettings, StorageContext, VectorStoreIndex
+from llama_index.core.retrievers import QueryFusionRetriever
+from llama_index.core.schema import TextNode
+from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.retrievers.bm25 import BM25Retriever
+from llama_index.vector_stores.chroma import ChromaVectorStore
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# LlamaIndex 전역 임베딩 설정 (LLM은 사용하지 않음)
+LlamaSettings.embed_model = OllamaEmbedding(
+    model_name=settings.ollama_embed_model,
+    base_url=settings.ollama_host,
+)
+LlamaSettings.llm = None
+
 _chroma_client = None
+_indexes: dict[str, VectorStoreIndex] = {}
 
 
 def _client():
@@ -19,7 +32,24 @@ def _client():
     return _chroma_client
 
 
-def _collection(user_id: str):
+def _get_index(user_id: str) -> VectorStoreIndex:
+    """사용자별 VectorStoreIndex 싱글톤 반환."""
+    if user_id not in _indexes:
+        safe_id = user_id.replace("-", "_")
+        collection = _client().get_or_create_collection(
+            name=f"memory_{safe_id}",
+            metadata={"hnsw:space": "cosine"},
+        )
+        vector_store = ChromaVectorStore(chroma_collection=collection)
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        _indexes[user_id] = VectorStoreIndex.from_vector_store(
+            vector_store, storage_context=storage_context
+        )
+    return _indexes[user_id]
+
+
+def _raw_collection(user_id: str):
+    """중복 체크 / purge 등 raw 접근이 필요한 경우 ChromaDB 컬렉션 직접 반환."""
     safe_id = user_id.replace("-", "_")
     return _client().get_or_create_collection(
         name=f"memory_{safe_id}",
@@ -27,71 +57,21 @@ def _collection(user_id: str):
     )
 
 
-async def _embed(texts: list[str]) -> list[list[float]]:
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            f"{settings.ollama_host}/api/embed",
-            json={"model": settings.ollama_embed_model, "input": texts},
-        )
-        resp.raise_for_status()
-        return resp.json()["embeddings"]
-
-
-async def store_memory(user_id: str, text: str) -> None:
-    """대화 내용이나 중요 정보를 ChromaDB에 저장한다."""
-    try:
-        embeddings = await _embed([text[:2000]])
-        col = _collection(user_id)
-
-        # 유사도 95% 이상인 기억이 이미 있으면 첫 번째는 update, 나머지는 delete (중복 제거)
-        count = col.count()
-        if count > 0:
-            results = col.query(
-                query_embeddings=embeddings,
-                n_results=min(3, count),
-                include=["distances", "documents"],
-            )
-            distances = results["distances"][0]
-            ids = results["ids"][0]
-            docs = results["documents"][0]
-
-            similar_ids = [ids[i] for i, d in enumerate(distances) if d < 0.05]
-            if similar_ids:
-                if docs[0] == text[:2000]:
-                    logger.info("[memory] skip exact duplicate user=%s", user_id)
-                    return
-                # 첫 번째 문서를 새 내용으로 update
-                col.update(
-                    ids=[similar_ids[0]],
-                    documents=[text[:2000]],
-                    embeddings=embeddings,
-                    metadatas=[{"timestamp": str(int(time.time()))}],
-                )
-                logger.info("[memory] updated id=%s user=%s", similar_ids[0], user_id)
-                # 나머지 유사 문서는 삭제 (중복 제거)
-                if len(similar_ids) > 1:
-                    col.delete(ids=similar_ids[1:])
-                    logger.info("[memory] deleted %d duplicates user=%s", len(similar_ids) - 1, user_id)
-                return
-
-        doc_id = f"mem_{int(time.time() * 1000)}"
-        col.upsert(
-            ids=[doc_id],
-            documents=[text[:2000]],
-            embeddings=embeddings,
-            metadatas=[{"timestamp": str(int(time.time()))}],
-        )
-        logger.info("[memory] stored id=%s user=%s", doc_id, user_id)
-    except Exception as e:
-        logger.warning("[memory] store failed: %s", e)
+def _tokenize(text: str) -> list[str]:
+    tokens = re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
+    korean_words = re.findall(r"[가-힣]+", text)
+    extra: list[str] = []
+    for word in korean_words:
+        for i in range(len(word) - 1):
+            extra.append(word[i : i + 2])
+        extra.extend(list(word))
+    return tokens + extra
 
 
 _JUNK_PATTERNS = re.compile(
     r'(핵심\s*정보[^:]*:|없으면\s*빈\s*문자열|내용\s*없음|없음$|없습니다$|\(내용\s*없음\))',
     re.IGNORECASE,
 )
-
-# 실시간 데이터 패턴 (주가, 환율, 지수 등 시세 정보는 저장 금지)
 _REALTIME_PATTERNS = re.compile(
     r'(주가\s*[:：]|코스피|코스닥|나스닥|s&p|환율\s*[:：]|달러\s*[:：]|원\s*/\s*달러|'
     r'비트코인|이더리움|코인\s*가격|주식\s*가격|지수\s*[:：]|포인트\s*$|'
@@ -100,10 +80,113 @@ _REALTIME_PATTERNS = re.compile(
 )
 
 
-async def purge_junk_memories(user_id: str) -> int:
-    """오염된 기억(prefix 포함, 무의미한 내용)을 ChromaDB에서 삭제하고 삭제 건수를 반환한다."""
+async def store_memory(user_id: str, text: str) -> None:
+    """기억을 VectorStoreIndex(ChromaDB)에 저장한다. 유사 문서 중복 제거 포함."""
     try:
-        col = _collection(user_id)
+        text = text[:2000]
+        col = _raw_collection(user_id)
+        count = col.count()
+
+        if count > 0:
+            # 유사도 95% 이상(거리 < 0.05) 중복 체크
+            index = _get_index(user_id)
+            vec_retriever = index.as_retriever(similarity_top_k=min(3, count))
+            nodes = await vec_retriever.aretrieve(text)
+
+            similar = [n for n in nodes if (1 - n.score) < 0.05 if n.score is not None]
+            if similar:
+                top = similar[0]
+                if top.node.text.strip() == text.strip():
+                    logger.info("[memory] skip exact duplicate user=%s", user_id)
+                    return
+                # 기존 문서 삭제 후 새 내용으로 재삽입 (update)
+                all_ids = [n.node.node_id for n in similar]
+                col.delete(ids=all_ids)
+                # 인덱스 캐시 무효화
+                _indexes.pop(user_id, None)
+                logger.info("[memory] replaced %d similar docs user=%s", len(all_ids), user_id)
+
+        doc_id = f"mem_{int(time.time() * 1000)}"
+        doc = Document(
+            text=text,
+            id_=doc_id,
+            metadata={"timestamp": str(int(time.time())), "user_id": user_id},
+        )
+        index = _get_index(user_id)
+        index.insert(doc)
+        logger.info("[memory] stored id=%s user=%s", doc_id, user_id)
+    except Exception as e:
+        logger.warning("[memory] store failed: %s", e)
+
+
+async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]:
+    """유사한 기억이 있으면 (node_id, text) 반환, 없으면 (None, None)."""
+    try:
+        col = _raw_collection(user_id)
+        if col.count() == 0:
+            return None, None
+        index = _get_index(user_id)
+        retriever = index.as_retriever(similarity_top_k=1)
+        nodes = await retriever.aretrieve(text[:2000])
+        if nodes and nodes[0].score is not None and (1 - nodes[0].score) < 0.05:
+            return nodes[0].node.node_id, nodes[0].node.text
+        return None, None
+    except Exception as e:
+        logger.warning("[memory] find_similar failed: %s", e)
+        return None, None
+
+
+async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
+    """벡터 + BM25 하이브리드 검색 (QueryFusionRetriever RRF)으로 관련 기억을 반환한다."""
+    try:
+        col = _raw_collection(user_id)
+        count = col.count()
+        if count == 0:
+            return []
+
+        candidates = min(max(n * 4, 10), count)
+        index = _get_index(user_id)
+
+        # 벡터 리트리버
+        vector_retriever = index.as_retriever(similarity_top_k=candidates)
+
+        # BM25 리트리버 — ChromaDB에서 전체 텍스트 가져와 초기화
+        all_data = col.get(limit=min(count, 2000), include=["documents", "ids"])
+        bm25_nodes = [
+            TextNode(id_=doc_id, text=doc)
+            for doc_id, doc in zip(all_data["ids"], all_data["documents"])
+            if doc
+        ]
+        bm25_retriever = BM25Retriever.from_defaults(
+            nodes=bm25_nodes,
+            similarity_top_k=candidates,
+            tokenizer=_tokenize,
+        )
+
+        # QueryFusionRetriever (RRF 융합)
+        retriever = QueryFusionRetriever(
+            retrievers=[vector_retriever, bm25_retriever],
+            similarity_top_k=n,
+            mode="reciprocal_rerank",
+            use_async=True,
+            verbose=False,
+        )
+
+        nodes = await retriever.aretrieve(query[:2000])
+        docs = [node.node.text for node in nodes if node.node.text]
+
+        logger.info("[memory] hybrid search user=%s found=%d", user_id, len(docs))
+        logger.info("[memory] results: %s", [d[:50] for d in docs])
+        return docs
+    except Exception as e:
+        logger.warning("[memory] search failed: %s", e)
+        return []
+
+
+async def purge_junk_memories(user_id: str) -> int:
+    """오염된 기억을 ChromaDB에서 삭제하고 삭제 건수를 반환한다."""
+    try:
+        col = _raw_collection(user_id)
         count = col.count()
         if count == 0:
             return 0
@@ -115,115 +198,9 @@ async def purge_junk_memories(user_id: str) -> int:
         ]
         if junk_ids:
             col.delete(ids=junk_ids)
+            _indexes.pop(user_id, None)  # 캐시 무효화
             logger.info("[memory] purged %d junk docs user=%s", len(junk_ids), user_id)
         return len(junk_ids)
     except Exception as e:
         logger.warning("[memory] purge_junk failed: %s", e)
         return 0
-
-
-async def find_similar(user_id: str, text: str) -> tuple[str | None, str | None]:
-    """유사한 기억이 있으면 (existing_id, existing_doc) 반환, 없으면 (None, None)."""
-    try:
-        embeddings = await _embed([text[:2000]])
-        col = _collection(user_id)
-        count = col.count()
-        if count == 0:
-            return None, None
-        results = col.query(
-            query_embeddings=embeddings,
-            n_results=1,
-            include=["distances", "documents"],
-        )
-        if results["distances"][0] and results["distances"][0][0] < 0.05:
-            return results["ids"][0][0], results["documents"][0][0]
-        return None, None
-    except Exception as e:
-        logger.warning("[memory] find_similar failed: %s", e)
-        return None, None
-
-
-def _tokenize(text: str) -> list[str]:
-    tokens = re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
-    korean_words = re.findall(r"[가-힣]+", text)
-    extra: list[str] = []
-    for word in korean_words:
-        # 2-gram: 복합어 분해 ("결혼정장" → "결혼","혼정","정장", 조사 분리 "업체가" → "업체")
-        for i in range(len(word) - 1):
-            extra.append(word[i : i + 2])
-        # 단일 음절: 1자 검색 대응 ("내차가" → "차" 매칭)
-        extra.extend(list(word))
-    return tokens + extra
-
-
-async def search_memory(user_id: str, query: str, n: int = 3) -> list[str]:
-    """벡터 + BM25 하이브리드 검색 (RRF 융합)으로 관련 기억을 반환한다."""
-    try:
-        from rank_bm25 import BM25Okapi
-
-        col = _collection(user_id)
-        count = col.count()
-        if count == 0:
-            return []
-
-        candidates = min(max(n * 4, 10), count)
-
-        # --- 벡터 검색 ---
-        embeddings = await _embed([query[:2000]])
-        vec_results = col.query(
-            query_embeddings=embeddings,
-            n_results=candidates,
-            include=["documents"],
-        )
-        vec_ids: list[str] = vec_results["ids"][0]
-        vec_docs: list[str] = vec_results["documents"][0]
-
-        # --- BM25 검색 ---
-        all_data = col.get(limit=min(count, 2000), include=["documents"])
-        all_ids: list[str] = all_data["ids"]
-        all_docs: list[str] = all_data["documents"]
-
-        tokenized_corpus = [_tokenize(doc) for doc in all_docs]
-        bm25 = BM25Okapi(tokenized_corpus)
-        bm25_scores = bm25.get_scores(_tokenize(query))
-        bm25_top_idx = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:candidates]
-
-        # --- RRF 융합 (K=60) ---
-        K = 60
-        rrf: dict[str, float] = {}
-        id_to_doc: dict[str, str] = {}
-
-        for rank, (doc_id, doc) in enumerate(zip(vec_ids, vec_docs)):
-            rrf[doc_id] = rrf.get(doc_id, 0.0) + 1 / (K + rank + 1)
-            id_to_doc[doc_id] = doc
-
-        for rank, idx in enumerate(bm25_top_idx):
-            doc_id = all_ids[idx]
-            rrf[doc_id] = rrf.get(doc_id, 0.0) + 1 / (K + rank + 1)
-            id_to_doc[doc_id] = all_docs[idx]
-
-        sorted_ids = sorted(rrf, key=lambda d: rrf[d], reverse=True)
-        result_ids = list(sorted_ids[:n])
-
-        # BM25 top-3 진단 로그 (vector 편향 분석용)
-        if bm25_top_idx:
-            logger.info(
-                "[memory] BM25 top-3: %s",
-                [(all_docs[idx][:35], round(bm25_scores[idx], 3)) for idx in bm25_top_idx[:3]],
-            )
-
-            best_bm25_id = all_ids[bm25_top_idx[0]]
-            best_bm25_score = bm25_scores[bm25_top_idx[0]]
-            # score > 0 이면 BM25 #1을 결과에 강제 포함 (vector 편향 보정, 임계값 제거)
-            if best_bm25_score > 0 and best_bm25_id not in result_ids and best_bm25_id in id_to_doc:
-                result_ids[-1] = best_bm25_id
-                logger.info("[memory] BM25 #1 forced (score=%.2f): %s", best_bm25_score, all_docs[bm25_top_idx[0]][:40])
-
-        docs = [id_to_doc[doc_id] for doc_id in result_ids if doc_id in id_to_doc]
-
-        logger.info("[memory] hybrid search user=%s found=%d (vec+bm25 rrf)", user_id, len(docs))
-        logger.info("[memory] search results: %s", [d[:50] for d in docs])
-        return docs
-    except Exception as e:
-        logger.warning("[memory] search failed: %s", e)
-        return []
