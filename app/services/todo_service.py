@@ -1,7 +1,7 @@
 import logging
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.todo import Todo
@@ -31,7 +31,7 @@ async def list_todos(db: AsyncSession, user_id: str) -> str:
     result = await db.execute(
         select(Todo)
         .where(Todo.user_id == user_id, Todo.done == False)
-        .order_by(Todo.due_date.asc().nulls_last(), Todo.created_at.asc())
+        .order_by(func.isnull(Todo.due_date), Todo.due_date.asc(), Todo.created_at.asc())
     )
     todos = result.scalars().all()
     if not todos:
