@@ -144,7 +144,7 @@ async def _summarize_site(site_url: str) -> str:
                 SystemMessage(content="당신은 뉴스 편집자입니다. 한국어로 간결하게 답변하세요."),
                 HumanMessage(content=prompt),
             ]),
-            timeout=60,
+            timeout=180,
         )
         raw = resp.content
         if isinstance(raw, list):
