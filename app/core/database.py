@@ -31,3 +31,10 @@ async def get_db() -> AsyncSession:
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # due_date 컬럼 추가 마이그레이션 (이미 있으면 무시)
+        try:
+            await conn.execute(
+                __import__("sqlalchemy").text("ALTER TABLE todos ADD COLUMN due_date DATE NULL")
+            )
+        except Exception:
+            pass

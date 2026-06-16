@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,39 +9,72 @@ from app.models.todo import Todo
 logger = logging.getLogger(__name__)
 
 
-async def add_todo(db: AsyncSession, user_id: str, content: str) -> str:
-    todo = Todo(user_id=user_id, content=content)
+async def add_todo(db: AsyncSession, user_id: str, content: str, due_date: str | None = None) -> str:
+    parsed_date: date | None = None
+    if due_date:
+        try:
+            parsed_date = date.fromisoformat(due_date)
+        except ValueError:
+            return f"날짜 형식이 올바르지 않습니다. YYYY-MM-DD 형식으로 입력해주세요. (입력값: {due_date})"
+
+    todo = Todo(user_id=user_id, content=content, due_date=parsed_date)
     db.add(todo)
     await db.commit()
     await db.refresh(todo)
-    logger.info("[todo] added id=%d user=%s", todo.id, user_id)
-    return f"할 일 추가됨: {content} [AGENT_ONLY id={todo.id}]"
+    logger.info("[todo] added id=%d user=%s due=%s", todo.id, user_id, parsed_date)
+    date_str = f" (기한: {parsed_date})" if parsed_date else ""
+    return f"할 일 추가됨: {content}{date_str} [AGENT_ONLY id={todo.id}]"
 
 
 async def list_todos(db: AsyncSession, user_id: str) -> str:
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    """미완료 할 일 전체를 기한 순으로 반환한다."""
     result = await db.execute(
         select(Todo)
-        .where(Todo.user_id == user_id, Todo.created_at >= today_start)
+        .where(Todo.user_id == user_id, Todo.done == False)
+        .order_by(Todo.due_date.asc().nulls_last(), Todo.created_at.asc())
+    )
+    todos = result.scalars().all()
+    if not todos:
+        return "등록된 할 일이 없습니다."
+
+    today = date.today()
+    display = ["*할 일 목록*"]
+    refs = []
+    for t in todos:
+        if t.due_date:
+            if t.due_date < today:
+                date_label = f"⚠️ {t.due_date} (기한 초과)"
+            elif t.due_date == today:
+                date_label = f"📅 오늘 ({t.due_date})"
+            else:
+                date_label = f"📅 {t.due_date}"
+        else:
+            date_label = "날짜 없음"
+        display.append(f"⬜ {t.content} — {date_label}")
+        refs.append(f"id={t.id}: {t.content}")
+
+    display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
+    return "\n".join(display)
+
+
+async def list_today_todos(db: AsyncSession, user_id: str) -> str:
+    """오늘 기한인 할 일 목록 (브리핑용)."""
+    today = date.today()
+    result = await db.execute(
+        select(Todo)
+        .where(Todo.user_id == user_id, Todo.done == False, Todo.due_date == today)
         .order_by(Todo.created_at)
     )
     todos = result.scalars().all()
     if not todos:
-        return "오늘 등록된 할 일이 없습니다."
-    display = ["*오늘 할 일*"]
-    refs = []
+        return ""
+    lines = [f"*오늘 할 일 ({today})*"]
     for t in todos:
-        check = "✅" if t.done else "⬜"
-        display.append(f"{check} {t.content}")
-        if not t.done:
-            refs.append(f"id={t.id}: {t.content}")
-    if refs:
-        display.append("\n[AGENT_ONLY - 사용자에게 표시 금지]\n" + "\n".join(refs))
-    return "\n".join(display)
+        lines.append(f"⬜ {t.content}")
+    return "\n".join(lines)
 
 
 async def list_completed_todos(db: AsyncSession, user_id: str, days: int = 7) -> str:
-    """지난 N일 동안 완료된 할 일 목록을 반환한다."""
     since = datetime.now() - timedelta(days=days)
     result = await db.execute(
         select(Todo)

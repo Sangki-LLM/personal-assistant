@@ -31,7 +31,7 @@ async def _send_morning_briefing() -> None:
     calendar_info = calendar_service.list_events(today)
 
     async with AsyncSessionLocal() as db:
-        todos_info = await todo_service.list_todos(db, settings.slack_my_user_id)
+        todos_info = await todo_service.list_today_todos(db, settings.slack_my_user_id)
 
     spending_alert = expense_service.get_spending_alert()
 

@@ -64,7 +64,7 @@ def _build_system_prompt() -> str:
 | 알림·리마인더 설정 | set_reminder 단독 호출 (add_todo 금지) |
 | 리마인더 목록 조회 | list_reminders |
 | 리마인더 취소 | cancel_reminder |
-| 할 일 추가 (명시적 요청 시에만) | add_todo |
+| 할 일 추가 (명시적 요청 시에만) | add_todo(content=내용, due_date=YYYY-MM-DD) — 날짜 언급 시 반드시 due_date 포함 |
 | 할 일 목록 조회 | list_todos |
 | 할 일 완료 처리 | complete_todo |
 | 과거 대화·정보 질문 | search_memory |
@@ -295,17 +295,17 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return await rs.cancel_reminder(db, user_id, reminder_id)
 
     @langchain_tool
-    async def add_todo(content: str) -> str:
-        """할 일을 추가합니다."""
-        logger.info("[tool] add_todo content=%s", content[:40])
+    async def add_todo(content: str, due_date: str = "") -> str:
+        """할 일을 추가합니다. due_date: 기한 날짜 YYYY-MM-DD (없으면 빈 문자열)"""
+        logger.info("[tool] add_todo content=%s due=%s", content[:40], due_date)
         from app.core.database import AsyncSessionLocal
         from app.services import todo_service
         async with AsyncSessionLocal() as db:
-            return await todo_service.add_todo(db, user_id, content)
+            return await todo_service.add_todo(db, user_id, content, due_date or None)
 
     @langchain_tool
     async def list_todos() -> str:
-        """오늘 할 일 목록을 조회합니다."""
+        """미완료 할 일 전체 목록을 기한 순으로 조회합니다."""
         logger.info("[tool] list_todos user=%s", user_id)
         from app.core.database import AsyncSessionLocal
         from app.services import todo_service
