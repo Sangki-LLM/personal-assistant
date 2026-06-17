@@ -34,5 +34,8 @@ class Settings(BaseSettings):
     # 뉴스 브리핑 (쉼표 구분 URL 목록)
     news_urls: str = ""
 
+    # 파일 저장 경로
+    file_storage_path: str = "/app/user_files"
+
 
 settings = Settings()

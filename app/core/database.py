@@ -29,6 +29,8 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db() -> None:
+    from app.models import user_file  # noqa: F401 — UserFile 모델 등록
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # due_date 컬럼 추가 마이그레이션 (이미 있으면 무시)

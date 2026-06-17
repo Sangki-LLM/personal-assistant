@@ -39,16 +39,23 @@ async def _handle_event(event: dict, channel_id: str) -> None:
         logger.info("[slack] ignored message from unauthorized user=%s", user_id)
         return
 
-    # 이미지 파일 이벤트 처리
+    # 파일 이벤트 처리
     files = event.get("files", [])
     if files:
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service
         for f in files:
             mime = f.get("mimetype", "")
+            url = f.get("url_private") or f.get("url_private_download", "")
+            if not url:
+                continue
             if mime.startswith("image/"):
-                url = f.get("url_private") or f.get("url_private_download", "")
-                if url:
-                    await agent_service.handle_receipt_image(user_id, url, channel_id)
-                return
+                await agent_service.handle_receipt_image(user_id, url, channel_id)
+            else:
+                async with AsyncSessionLocal() as db:
+                    result = await file_service.handle_slack_file(db, user_id, f, channel_id)
+                await slack_service.send_message(channel_id, result)
+        return
 
     if not text:
         return

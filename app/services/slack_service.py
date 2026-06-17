@@ -32,3 +32,28 @@ async def send_dm(user_id: str, text: str) -> None:
         logger.info("[slack] DM sent to user=%s", user_id)
     except Exception as e:
         logger.warning("[slack] send_dm failed: %s", e)
+
+
+async def upload_file(channel_id: str, filename: str, file_bytes: bytes, comment: str = "") -> None:
+    """파일을 Slack 채널에 업로드한다."""
+    try:
+        client = _client()
+        try:
+            await client.files_upload_v2(
+                channel=channel_id,
+                file=file_bytes,
+                filename=filename,
+                title=filename,
+                initial_comment=comment,
+            )
+        except AttributeError:
+            await client.files_upload(
+                channels=channel_id,
+                file=file_bytes,
+                filename=filename,
+                title=filename,
+                initial_comment=comment,
+            )
+        logger.info("[slack] uploaded file=%s channel=%s", filename, channel_id)
+    except Exception as e:
+        logger.warning("[slack] upload_file failed filename=%s: %s", filename, e)

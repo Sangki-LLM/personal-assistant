@@ -73,6 +73,8 @@ def _build_system_prompt() -> str:
 | 날씨 질문 ("~~ 날씨", "날씨 어때") | get_weather(location=지역명) |
 | URL이 포함된 메시지 | summarize_url |
 | 최신 정보·검색 필요 | web_search |
+| 저장된 파일 검색·요청 ("파일 줘", "문서 보내줘") | find_file |
+| 저장된 파일 전체 목록 조회 | list_files |
 
 **날짜 변환 (오늘={today} 기준):**
 - "다음주 토요일" → 실제 YYYY-MM-DD 계산 후 전달
@@ -348,13 +350,58 @@ def _make_tools(user_id: str, channel_id: str = ""):
             logger.warning("[tool] web_search timeout")
             return "웹 검색 시간 초과."
 
+    @langchain_tool
+    async def find_file(query: str) -> str:
+        """저장된 파일을 이름, 날짜, 종류로 검색해서 Slack으로 전송합니다. query: 파일명·날짜·종류 등"""
+        logger.info("[tool] find_file user=%s query=%s", user_id, query[:50])
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service, slack_service
+
+        filenames = await file_service.search_files(user_id, query, n=5)
+        if not filenames:
+            return "관련 파일을 찾지 못했습니다."
+
+        async with AsyncSessionLocal() as db:
+            matched = [
+                f for fn in filenames
+                for f in [await file_service.get_file_by_name(db, user_id, fn)]
+                if f
+            ]
+
+        if not matched:
+            return "관련 파일을 찾지 못했습니다."
+
+        if len(matched) == 1:
+            f = matched[0]
+            content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
+            if channel_id:
+                await slack_service.upload_file(channel_id, f.original_name, content, "요청하신 파일입니다.")
+            return f"*{f.original_name}* 파일을 보냈습니다."
+
+        lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})" for f in matched[:5]]
+        return "찾은 파일 목록:\n" + "\n".join(lines) + "\n\n더 구체적으로 파일명이나 날짜를 알려주세요."
+
+    @langchain_tool
+    async def list_files() -> str:
+        """저장된 파일 전체 목록을 조회합니다."""
+        logger.info("[tool] list_files user=%s", user_id)
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service
+
+        async with AsyncSessionLocal() as db:
+            files = await file_service.list_all_files(db, user_id)
+        if not files:
+            return "저장된 파일이 없습니다."
+        lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d %H:%M')})" for f in files]
+        return f"저장된 파일 ({len(files)}개):\n" + "\n".join(lines)
+
     return [
         search_memory, save_memory, query_knowledge_graph, get_weather, summarize_url,
         add_calendar_event, list_calendar_events,
         add_expense, get_expense_summary,
         set_reminder, list_reminders, cancel_reminder,
         add_todo, list_todos, complete_todo,
-        web_search,
+        web_search, find_file, list_files,
     ]
 
 
