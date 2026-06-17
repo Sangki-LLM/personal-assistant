@@ -1,9 +1,19 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+
+
+class FileBundle(Base):
+    __tablename__ = "file_bundles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(500))
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 class UserFile(Base):
@@ -16,5 +26,7 @@ class UserFile(Base):
     mimetype: Mapped[str] = mapped_column(String(200))
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     chroma_id: Mapped[str] = mapped_column(String(100))
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    bundle_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("file_bundles.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

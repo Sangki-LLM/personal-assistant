@@ -1,5 +1,8 @@
+import io
 import logging
+import re
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -12,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.user_file import UserFile
+from app.models.user_file import FileBundle, UserFile
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,22 @@ _chroma_client = None
 _indexes: dict[str, VectorStoreIndex] = {}
 
 LlamaSettings.llm = None
+
+# 단순 카테고리 추론: 짧고 특수문자 없는 텍스트만 카테고리로 인식
+_CATEGORY_PATTERN = re.compile(r'^[가-힣A-Za-z0-9 _\-]{1,15}$')
+_IGNORE_WORDS = {"저장", "해줘", "이거", "파일", "문서", "보내", "올려", "넣어", "주세요", "좀"}
+
+
+def _extract_category(text: str) -> str | None:
+    text = text.strip()
+    if not text or len(text) > 15:
+        return None
+    words = set(re.findall(r'[가-힣]+', text))
+    if words & _IGNORE_WORDS:
+        return None
+    if _CATEGORY_PATTERN.match(text):
+        return text
+    return None
 
 
 def _client():
@@ -54,37 +73,45 @@ def _storage_dir(user_id: str) -> Path:
     return path
 
 
-def _make_embed_text(filename: str, mimetype: str, dt: datetime) -> str:
-    return f"파일명: {filename} | 종류: {mimetype} | 날짜: {dt.strftime('%Y-%m-%d')}"
+def _make_embed_text(filename: str, mimetype: str, dt: datetime, category: str | None) -> str:
+    parts = [f"파일명: {filename}", f"종류: {mimetype}", f"날짜: {dt.strftime('%Y-%m-%d')}"]
+    if category:
+        parts.insert(1, f"카테고리: {category}")
+    return " | ".join(parts)
 
 
-def _index_file(user_id: str, chroma_id: str, filename: str, mimetype: str, dt: datetime) -> None:
+def _index_file(user_id: str, chroma_id: str, filename: str, mimetype: str, dt: datetime, category: str | None) -> None:
     try:
         doc = Document(
-            text=_make_embed_text(filename, mimetype, dt),
+            text=_make_embed_text(filename, mimetype, dt, category),
             id_=chroma_id,
-            metadata={"user_id": user_id, "filename": filename, "mimetype": mimetype},
+            metadata={"user_id": user_id, "filename": filename, "mimetype": mimetype, "category": category or ""},
         )
         _get_index(user_id).insert(doc)
     except Exception as e:
         logger.warning("[file] chroma index failed: %s", e)
 
 
-def _reindex_file(user_id: str, chroma_id: str, filename: str, mimetype: str, dt: datetime) -> None:
+def _reindex_file(user_id: str, chroma_id: str, filename: str, mimetype: str, dt: datetime, category: str | None) -> None:
     try:
         safe_id = user_id.replace("-", "_")
-        col = _client().get_or_create_collection(
-            name=f"files_{safe_id}", metadata={"hnsw:space": "cosine"}
-        )
+        col = _client().get_or_create_collection(name=f"files_{safe_id}", metadata={"hnsw:space": "cosine"})
         col.delete(ids=[chroma_id])
         _indexes.pop(user_id, None)
-        _index_file(user_id, chroma_id, filename, mimetype, dt)
+        _index_file(user_id, chroma_id, filename, mimetype, dt, category)
     except Exception as e:
         logger.warning("[file] chroma reindex failed: %s", e)
 
 
-async def handle_slack_file(db: AsyncSession, user_id: str, slack_file: dict, channel_id: str) -> str:
-    """Slack에서 수신한 파일 메타데이터를 받아 다운로드 후 저장한다."""
+async def _download(url: str) -> bytes:
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {settings.slack_bot_token}"})
+        resp.raise_for_status()
+        return resp.content
+
+
+async def handle_slack_file(db: AsyncSession, user_id: str, slack_file: dict, channel_id: str, text: str = "") -> str:
+    """단일 파일 수신 처리."""
     filename = slack_file.get("name", "unknown_file")
     mimetype = slack_file.get("mimetype", "application/octet-stream")
     url = slack_file.get("url_private") or slack_file.get("url_private_download", "")
@@ -93,24 +120,64 @@ async def handle_slack_file(db: AsyncSession, user_id: str, slack_file: dict, ch
         return "파일 URL을 가져오지 못했습니다."
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(
-                url, headers={"Authorization": f"Bearer {settings.slack_bot_token}"}
-            )
-            resp.raise_for_status()
-            content_bytes = resp.content
+        content_bytes = await _download(url)
     except Exception as e:
         logger.warning("[file] download failed filename=%s: %s", filename, e)
         return f"파일 다운로드 실패: {e}"
 
-    file_record = await save_file(db, user_id, filename, content_bytes, mimetype)
+    category = _extract_category(text)
+    file_record = await save_file(db, user_id, filename, content_bytes, mimetype, category=category)
     size_str = _fmt_size(file_record.size_bytes)
     action = "업데이트" if file_record.updated_at != file_record.created_at else "저장"
-    return f"✅ *{filename}* {action}했습니다. ({size_str})"
+    cat_str = f" (카테고리: *{category}*)" if category else ""
+    return f"✅ *{filename}* {action}했습니다. ({size_str}){cat_str}"
+
+
+async def handle_slack_files(db: AsyncSession, user_id: str, slack_files: list[dict], channel_id: str, text: str = "") -> str:
+    """여러 파일을 번들로 묶어 수신 처리."""
+    category = _extract_category(text)
+
+    first_name = slack_files[0].get("name", "파일") if slack_files else "파일"
+    bundle_name = text.strip() if (text and len(text) <= 30 and not _extract_category(text) is None) else \
+                  (category or f"{first_name} 외 {len(slack_files)-1}개")
+    if not bundle_name or bundle_name == category:
+        bundle_name = f"{first_name} 외 {len(slack_files)-1}개"
+
+    bundle = FileBundle(user_id=user_id, name=bundle_name, category=category, created_at=datetime.now())
+    db.add(bundle)
+    await db.flush()
+
+    saved, failed = [], []
+    for sf in slack_files:
+        filename = sf.get("name", "unknown")
+        mimetype = sf.get("mimetype", "application/octet-stream")
+        url = sf.get("url_private") or sf.get("url_private_download", "")
+        if not url:
+            continue
+        try:
+            content_bytes = await _download(url)
+            await save_file(db, user_id, filename, content_bytes, mimetype, category=category, bundle_id=bundle.id)
+            saved.append(filename)
+        except Exception as e:
+            logger.warning("[file] bundle item failed %s: %s", filename, e)
+            failed.append(filename)
+
+    await db.commit()
+
+    names = "\n".join(f"• {n}" for n in saved)
+    cat_str = f"\n카테고리: *{category}*" if category else ""
+    fail_str = f"\n실패: {', '.join(failed)}" if failed else ""
+    return f"✅ *{bundle_name}* 번들로 {len(saved)}개 저장했습니다.{cat_str}\n{names}{fail_str}"
 
 
 async def save_file(
-    db: AsyncSession, user_id: str, filename: str, content_bytes: bytes, mimetype: str
+    db: AsyncSession,
+    user_id: str,
+    filename: str,
+    content_bytes: bytes,
+    mimetype: str,
+    category: str | None = None,
+    bundle_id: int | None = None,
 ) -> UserFile:
     """파일을 로컬 + DB + ChromaDB에 저장한다. 같은 이름이 있으면 덮어쓴다."""
     result = await db.execute(
@@ -124,9 +191,13 @@ async def save_file(
             f.write(content_bytes)
         existing.size_bytes = len(content_bytes)
         existing.updated_at = now
+        if category is not None:
+            existing.category = category
+        if bundle_id is not None:
+            existing.bundle_id = bundle_id
         await db.commit()
         await db.refresh(existing)
-        _reindex_file(user_id, existing.chroma_id, filename, mimetype, now)
+        _reindex_file(user_id, existing.chroma_id, filename, existing.mimetype, now, existing.category)
         logger.info("[file] updated filename=%s user=%s", filename, user_id)
         return existing
 
@@ -143,24 +214,38 @@ async def save_file(
         mimetype=mimetype,
         size_bytes=len(content_bytes),
         chroma_id=chroma_id,
+        category=category,
+        bundle_id=bundle_id,
         created_at=now,
         updated_at=now,
     )
     db.add(file_record)
     await db.commit()
     await db.refresh(file_record)
-    _index_file(user_id, chroma_id, filename, mimetype, now)
-    logger.info("[file] saved filename=%s user=%s", filename, user_id)
+    _index_file(user_id, chroma_id, filename, mimetype, now, category)
+    logger.info("[file] saved filename=%s category=%s user=%s", filename, category, user_id)
     return file_record
 
 
+async def set_file_category(db: AsyncSession, user_id: str, filename: str, category: str) -> str:
+    """파일 카테고리를 설정/변경한다."""
+    result = await db.execute(
+        select(UserFile).where(UserFile.user_id == user_id, UserFile.original_name == filename)
+    )
+    file_record = result.scalar_one_or_none()
+    if not file_record:
+        return f"'{filename}' 파일을 찾을 수 없습니다."
+    file_record.category = category
+    await db.commit()
+    _reindex_file(user_id, file_record.chroma_id, filename, file_record.mimetype, file_record.updated_at, category)
+    return f"✅ *{filename}* 카테고리를 *{category}* 로 설정했습니다."
+
+
 async def search_files(user_id: str, query: str, n: int = 5) -> list[str]:
-    """ChromaDB 벡터 유사도로 파일명을 검색해 파일명 목록을 반환한다."""
+    """ChromaDB 벡터 유사도로 파일명을 검색해 반환한다."""
     try:
         safe_id = user_id.replace("-", "_")
-        col = _client().get_or_create_collection(
-            name=f"files_{safe_id}", metadata={"hnsw:space": "cosine"}
-        )
+        col = _client().get_or_create_collection(name=f"files_{safe_id}", metadata={"hnsw:space": "cosine"})
         if col.count() == 0:
             return []
         index = _get_index(user_id)
@@ -170,6 +255,26 @@ async def search_files(user_id: str, query: str, n: int = 5) -> list[str]:
     except Exception as e:
         logger.warning("[file] search failed: %s", e)
         return []
+
+
+async def find_by_category(db: AsyncSession, user_id: str, category: str) -> list[UserFile]:
+    """카테고리로 파일 목록을 DB에서 조회한다."""
+    result = await db.execute(
+        select(UserFile)
+        .where(UserFile.user_id == user_id, UserFile.category == category)
+        .order_by(UserFile.updated_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def list_categories(db: AsyncSession, user_id: str) -> list[str]:
+    """사용 중인 카테고리 목록을 반환한다."""
+    from sqlalchemy import distinct
+    result = await db.execute(
+        select(distinct(UserFile.category))
+        .where(UserFile.user_id == user_id, UserFile.category.isnot(None))
+    )
+    return [row[0] for row in result.all() if row[0]]
 
 
 async def get_file_by_name(db: AsyncSession, user_id: str, filename: str) -> UserFile | None:
@@ -189,6 +294,15 @@ async def list_all_files(db: AsyncSession, user_id: str) -> list[UserFile]:
 def read_file_bytes(stored_path: str) -> bytes:
     with open(stored_path, "rb") as f:
         return f.read()
+
+
+def create_zip(files: list[tuple[str, bytes]]) -> bytes:
+    """(파일명, 바이트) 목록을 zip으로 묶어 반환한다."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, content in files:
+            zf.writestr(filename, content)
+    return buf.getvalue()
 
 
 def _fmt_size(size_bytes: int) -> str:

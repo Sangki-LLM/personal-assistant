@@ -29,14 +29,19 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db() -> None:
-    from app.models import user_file  # noqa: F401 — UserFile 모델 등록
+    from app.models import user_file  # noqa: F401 — UserFile, FileBundle 모델 등록
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # due_date 컬럼 추가 마이그레이션 (이미 있으면 무시)
-        try:
-            await conn.execute(
-                __import__("sqlalchemy").text("ALTER TABLE todos ADD COLUMN due_date DATE NULL")
-            )
-        except Exception:
-            pass
+
+        _sql = __import__("sqlalchemy").text
+        migrations = [
+            "ALTER TABLE todos ADD COLUMN due_date DATE NULL",
+            "ALTER TABLE user_files ADD COLUMN category VARCHAR(100) NULL",
+            "ALTER TABLE user_files ADD COLUMN bundle_id INTEGER NULL",
+        ]
+        for stmt in migrations:
+            try:
+                await conn.execute(_sql(stmt))
+            except Exception:
+                pass

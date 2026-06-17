@@ -75,6 +75,9 @@ def _build_system_prompt() -> str:
 | 최신 정보·검색 필요 | web_search |
 | 저장된 파일 검색·요청 ("파일 줘", "문서 보내줘") | find_file |
 | 저장된 파일 전체 목록 조회 | list_files |
+| 특정 카테고리 파일 전체 요청 ("업무 파일 다 줘") | find_files_by_category |
+| 파일 카테고리 설정·변경 | set_file_category |
+| 저장된 카테고리 목록 조회 | list_categories |
 
 **날짜 변환 (오늘={today} 기준):**
 - "다음주 토요일" → 실제 YYYY-MM-DD 계산 후 전달
@@ -395,6 +398,68 @@ def _make_tools(user_id: str, channel_id: str = ""):
         lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d %H:%M')})" for f in files]
         return f"저장된 파일 ({len(files)}개):\n" + "\n".join(lines)
 
+    @langchain_tool
+    async def find_files_by_category(category: str) -> str:
+        """특정 카테고리의 파일 전체를 zip으로 묶어 Slack으로 전송합니다. category: 카테고리명"""
+        logger.info("[tool] find_files_by_category user=%s category=%s", user_id, category)
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service, slack_service
+
+        async with AsyncSessionLocal() as db:
+            files = await file_service.find_by_category(db, user_id, category)
+
+        if not files:
+            return f"*{category}* 카테고리에 저장된 파일이 없습니다."
+
+        if len(files) == 1:
+            f = files[0]
+            content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
+            if channel_id:
+                await slack_service.upload_file(channel_id, f.original_name, content, f"{category} 카테고리 파일입니다.")
+            return f"*{category}* 카테고리 파일 1개를 보냈습니다: {f.original_name}"
+
+        # 여러 개 → zip으로 묶어 전송
+        file_pairs = []
+        for f in files:
+            try:
+                content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
+                file_pairs.append((f.original_name, content))
+            except Exception as e:
+                logger.warning("[tool] find_files_by_category read failed %s: %s", f.original_name, e)
+
+        if not file_pairs:
+            return "파일을 읽는 중 오류가 발생했습니다."
+
+        zip_bytes = await asyncio.to_thread(file_service.create_zip, file_pairs)
+        zip_name = f"{category}_파일묶음.zip"
+        if channel_id:
+            await slack_service.upload_file(channel_id, zip_name, zip_bytes, f"{category} 카테고리 파일 {len(file_pairs)}개입니다.")
+        names = "\n".join(f"• {n}" for n, _ in file_pairs)
+        return f"*{category}* 카테고리 파일 {len(file_pairs)}개를 zip으로 묶어 보냈습니다.\n{names}"
+
+    @langchain_tool
+    async def set_file_category(filename: str, category: str) -> str:
+        """파일의 카테고리를 설정하거나 변경합니다. filename: 파일명, category: 카테고리명"""
+        logger.info("[tool] set_file_category user=%s filename=%s category=%s", user_id, filename, category)
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service
+
+        async with AsyncSessionLocal() as db:
+            return await file_service.set_file_category(db, user_id, filename, category)
+
+    @langchain_tool
+    async def list_categories() -> str:
+        """저장된 파일의 카테고리 목록을 조회합니다."""
+        logger.info("[tool] list_categories user=%s", user_id)
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service
+
+        async with AsyncSessionLocal() as db:
+            categories = await file_service.list_categories(db, user_id)
+        if not categories:
+            return "설정된 카테고리가 없습니다."
+        return "카테고리 목록:\n" + "\n".join(f"• {c}" for c in categories)
+
     return [
         search_memory, save_memory, query_knowledge_graph, get_weather, summarize_url,
         add_calendar_event, list_calendar_events,
@@ -402,6 +467,7 @@ def _make_tools(user_id: str, channel_id: str = ""):
         set_reminder, list_reminders, cancel_reminder,
         add_todo, list_todos, complete_todo,
         web_search, find_file, list_files,
+        find_files_by_category, set_file_category, list_categories,
     ]
 
 

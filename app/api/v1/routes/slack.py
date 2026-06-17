@@ -44,17 +44,22 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     if files:
         from app.core.database import AsyncSessionLocal
         from app.services import file_service
-        for f in files:
-            mime = f.get("mimetype", "")
+
+        image_files = [f for f in files if f.get("mimetype", "").startswith("image/")]
+        other_files = [f for f in files if not f.get("mimetype", "").startswith("image/")]
+
+        for f in image_files:
             url = f.get("url_private") or f.get("url_private_download", "")
-            if not url:
-                continue
-            if mime.startswith("image/"):
+            if url:
                 await agent_service.handle_receipt_image(user_id, url, channel_id)
-            else:
-                async with AsyncSessionLocal() as db:
-                    result = await file_service.handle_slack_file(db, user_id, f, channel_id)
-                await slack_service.send_message(channel_id, result)
+
+        if other_files:
+            async with AsyncSessionLocal() as db:
+                if len(other_files) == 1:
+                    result = await file_service.handle_slack_file(db, user_id, other_files[0], channel_id, text)
+                else:
+                    result = await file_service.handle_slack_files(db, user_id, other_files, channel_id, text)
+            await slack_service.send_message(channel_id, result)
         return
 
     if not text:
