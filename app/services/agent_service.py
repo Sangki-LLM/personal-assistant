@@ -357,9 +357,9 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return "웹 검색 시간 초과."
 
     @langchain_tool
-    async def find_file(query: str) -> str:
-        """저장된 파일을 이름, 날짜, 종류로 검색해서 Slack으로 전송합니다. query: 파일명·날짜·종류 등"""
-        logger.info("[tool] find_file user=%s query=%s", user_id, query[:50])
+    async def find_file(query: str, as_zip: bool = False) -> str:
+        """저장된 파일을 이름, 날짜, 종류로 검색해서 Slack으로 전송합니다. query: 파일명·날짜·종류 등. as_zip: 사용자가 zip으로 묶어달라고 했으면 True"""
+        logger.info("[tool] find_file user=%s query=%s as_zip=%s", user_id, query[:50], as_zip)
         from app.core.database import AsyncSessionLocal
         from app.services import file_service, slack_service
 
@@ -384,7 +384,18 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 await slack_service.upload_file(channel_id, f.original_name, content, "요청하신 파일입니다.")
             return f"*{f.original_name}* 파일을 보냈습니다."
 
-        # 여러 파일 → 개별 전송
+        if as_zip:
+            file_pairs = [
+                (f.original_name, await asyncio.to_thread(file_service.read_file_bytes, f.stored_path))
+                for f in matched
+            ]
+            zip_bytes = await asyncio.to_thread(file_service.create_zip, file_pairs)
+            if channel_id:
+                await slack_service.upload_file(channel_id, f"{query}_묶음.zip", zip_bytes, f"파일 {len(file_pairs)}개를 zip으로 묶었습니다.")
+            names = "\n".join(f"• {f.original_name}" for f in matched)
+            return f"파일 {len(file_pairs)}개를 zip으로 묶어 보냈습니다.\n{names}"
+
+        # 기본: 개별 전송
         sent = []
         for f in matched:
             content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
@@ -420,9 +431,9 @@ def _make_tools(user_id: str, channel_id: str = ""):
         return "\n".join(lines)
 
     @langchain_tool
-    async def find_files_by_category(category: str) -> str:
-        """특정 카테고리의 파일 전체를 zip으로 묶어 Slack으로 전송합니다. category: 카테고리명"""
-        logger.info("[tool] find_files_by_category user=%s category=%s", user_id, category)
+    async def find_files_by_category(category: str, as_zip: bool = False) -> str:
+        """특정 카테고리의 파일 전체를 Slack으로 전송합니다. category: 카테고리명. as_zip: 사용자가 zip으로 묶어달라고 했으면 True"""
+        logger.info("[tool] find_files_by_category user=%s category=%s as_zip=%s", user_id, category, as_zip)
         from app.core.database import AsyncSessionLocal
         from app.services import file_service, slack_service
 
@@ -439,7 +450,23 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 await slack_service.upload_file(channel_id, f.original_name, content, f"{category} 카테고리 파일입니다.")
             return f"*{category}* 카테고리 파일 1개를 보냈습니다: {f.original_name}"
 
-        # 여러 개 → 개별 전송
+        if as_zip:
+            file_pairs = []
+            for f in files:
+                try:
+                    content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
+                    file_pairs.append((f.original_name, content))
+                except Exception as e:
+                    logger.warning("[tool] find_files_by_category read failed %s: %s", f.original_name, e)
+            if not file_pairs:
+                return "파일을 읽는 중 오류가 발생했습니다."
+            zip_bytes = await asyncio.to_thread(file_service.create_zip, file_pairs)
+            if channel_id:
+                await slack_service.upload_file(channel_id, f"{category}_묶음.zip", zip_bytes, f"{category} 카테고리 파일 {len(file_pairs)}개입니다.")
+            names = "\n".join(f"• {n}" for n, _ in file_pairs)
+            return f"*{category}* 카테고리 파일 {len(file_pairs)}개를 zip으로 묶어 보냈습니다.\n{names}"
+
+        # 기본: 개별 전송
         sent = []
         for f in files:
             try:
