@@ -476,24 +476,40 @@ def _make_tools(user_id: str, channel_id: str = ""):
 
     @langchain_tool
     async def delete_file(query: str) -> str:
-        """파일 삭제 요청 시 후보 목록을 먼저 보여줍니다. 사용자가 정확한 파일명을 입력하면 삭제됩니다. query: 파일명·카테고리·날짜 등"""
+        """파일 삭제 요청 시 후보 목록을 먼저 보여줍니다. 사용자가 정확한 파일명을 입력하면 삭제됩니다. query: 파일명·카테고리·날짜 등. '전체' 또는 '모두' 입력 시 전체 목록 표시."""
         logger.info("[tool] delete_file user=%s query=%s", user_id, query[:50])
         from app.core.database import AsyncSessionLocal
         from app.services import file_service
 
-        filenames = await file_service.search_files(user_id, query, n=10)
-        if not filenames:
-            return "관련 파일을 찾지 못했습니다."
+        _ALL_KEYWORDS = {"전체", "모두", "모든", "다", "all", "ALL"}
+        is_all = any(kw in query for kw in _ALL_KEYWORDS)
 
         async with AsyncSessionLocal() as db:
-            candidates = [
-                f for fn in filenames
-                for f in [await file_service.get_file_by_name(db, user_id, fn)]
-                if f
-            ]
+            if is_all:
+                candidates = await file_service.list_all_files(db, user_id)
+            else:
+                filenames = await file_service.search_files(user_id, query, n=10)
+                seen: set[str] = set()
+                candidates = []
+                for fn in filenames:
+                    if fn in seen:
+                        continue
+                    seen.add(fn)
+                    f = await file_service.get_file_by_name(db, user_id, fn)
+                    if f:
+                        candidates.append(f)
 
         if not candidates:
             return "관련 파일을 찾지 못했습니다."
+
+        # DB 기준으로 중복 제거 (같은 original_name 여러 번 나올 경우)
+        seen_names: set[str] = set()
+        deduped = []
+        for f in candidates:
+            if f.original_name not in seen_names:
+                seen_names.add(f.original_name)
+                deduped.append(f)
+        candidates = deduped
 
         _pending_delete[user_id] = candidates
         lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})" for f in candidates]

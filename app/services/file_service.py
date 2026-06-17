@@ -96,6 +96,14 @@ def _make_embed_text(filename: str, mimetype: str, dt: datetime, category: str |
 
 def _index_file(user_id: str, chroma_id: str, filename: str, mimetype: str, dt: datetime, category: str | None) -> None:
     try:
+        # 기존 항목 먼저 삭제 (중복 방지)
+        safe_id = user_id.replace("-", "_")
+        col = _client().get_or_create_collection(name=f"files_{safe_id}", metadata={"hnsw:space": "cosine"})
+        try:
+            col.delete(ids=[chroma_id])
+        except Exception:
+            pass
+        _indexes.pop(user_id, None)
         doc = Document(
             text=_make_embed_text(filename, mimetype, dt, category),
             id_=chroma_id,
