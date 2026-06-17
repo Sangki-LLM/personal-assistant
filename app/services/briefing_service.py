@@ -12,6 +12,18 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
+def _extract_text(content) -> str:
+    """LLM 응답 content가 문자열이 아닌 리스트(Gemini 멀티파트)일 때 텍스트를 추출한다."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part.get("text", str(part)) if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    return str(content)
+
+
 def _make_llm():
     if settings.gemini_api_key:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -51,7 +63,7 @@ async def _send_morning_briefing() -> None:
             SystemMessage(content="당신은 친절한 개인 비서입니다. 한국어로 답변하세요."),
             HumanMessage(content=prompt),
         ])
-        briefing_text = response.content
+        briefing_text = _extract_text(response.content)
     except Exception as e:
         logger.warning("[briefing] LLM failed: %s", e)
         briefing_text = ""
@@ -107,7 +119,7 @@ async def _send_weekly_report() -> None:
             SystemMessage(content="당신은 친절한 개인 비서입니다. 한국어로 답변하세요."),
             HumanMessage(content=prompt),
         ])
-        summary = response.content
+        summary = _extract_text(response.content)
     except Exception as e:
         logger.warning("[briefing] weekly LLM failed: %s", e)
         summary = ""
