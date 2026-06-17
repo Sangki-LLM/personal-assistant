@@ -25,20 +25,33 @@ _indexes: dict[str, VectorStoreIndex] = {}
 
 LlamaSettings.llm = None
 
-# 단순 카테고리 추론: 짧고 특수문자 없는 텍스트만 카테고리로 인식
-_CATEGORY_PATTERN = re.compile(r'^[가-힣A-Za-z0-9 _\-]{1,15}$')
+# 카테고리 추론: 짧은 단어 직접 입력 또는 "X로 저장/분류" 문장 패턴
+_CATEGORY_PATTERN = re.compile(r'^[가-힣A-Za-z0-9 _\-]{1,20}$')
 _IGNORE_WORDS = {"저장", "해줘", "이거", "파일", "문서", "보내", "올려", "넣어", "주세요", "좀"}
+# "KB태양광 업무로 저장해줘" → "KB태양광 업무"
+_CATEGORY_SENTENCE_PATTERN = re.compile(
+    r'([가-힣A-Za-z0-9 _\-]{1,20})(?:으로|로)\s*(?:저장|분류|파일|묶어)'
+)
 
 
 def _extract_category(text: str) -> str | None:
     text = text.strip()
-    if not text or len(text) > 15:
+    if not text:
         return None
-    words = set(re.findall(r'[가-힣]+', text))
-    if words & _IGNORE_WORDS:
-        return None
-    if _CATEGORY_PATTERN.match(text):
-        return text
+
+    # 짧고 단순한 단어 → 바로 카테고리
+    if len(text) <= 20:
+        words = set(re.findall(r'[가-힣]+', text))
+        if not (words & _IGNORE_WORDS) and _CATEGORY_PATTERN.match(text):
+            return text
+
+    # 문장에서 "X로 저장/분류" 패턴 추출
+    m = _CATEGORY_SENTENCE_PATTERN.search(text)
+    if m:
+        cat = m.group(1).strip()
+        if cat:
+            return cat
+
     return None
 
 
