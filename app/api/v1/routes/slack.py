@@ -71,20 +71,31 @@ async def _handle_event(event: dict, channel_id: str) -> None:
             await slack_service.send_message(channel_id, "삭제를 취소했습니다.")
             return
 
+        # 정확히 일치하는 파일 먼저 탐색
+        matched_name = None
         if text in candidate_names:
+            matched_name = text
+        else:
+            # 퍼지 매칭 — 유사도 0.6 이상 중 가장 가까운 것
+            import difflib
+            close = difflib.get_close_matches(text, candidate_names, n=1, cutoff=0.6)
+            if close:
+                matched_name = close[0]
+
+        if matched_name:
             agent_service._pending_delete.pop(user_id)
             from app.core.database import AsyncSessionLocal
             from app.services import file_service
             async with AsyncSessionLocal() as db:
-                result = await file_service.delete_file(db, user_id, text)
+                result = await file_service.delete_file(db, user_id, matched_name)
             await slack_service.send_message(channel_id, result)
             return
 
-        # 정확히 일치하지 않으면 목록 재안내
+        # 매칭 실패 시 목록 재안내
         lines = "\n".join(f"• {n}" for n in candidate_names)
         await slack_service.send_message(
             channel_id,
-            f"파일명이 정확히 일치하지 않습니다. 아래 목록에서 *정확한 파일명*을 입력해주세요.\n\n{lines}\n\n취소: '취소'",
+            f"파일을 특정하지 못했습니다. 아래 목록에서 파일명 일부를 입력하거나 번호를 말해주세요.\n\n{lines}\n\n취소: '취소'",
         )
         return
 

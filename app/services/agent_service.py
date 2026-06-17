@@ -384,17 +384,15 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 await slack_service.upload_file(channel_id, f.original_name, content, "요청하신 파일입니다.")
             return f"*{f.original_name}* 파일을 보냈습니다."
 
-        # 여러 파일 → zip으로 묶어 바로 전송
-        file_pairs = [
-            (f.original_name, await asyncio.to_thread(file_service.read_file_bytes, f.stored_path))
-            for f in matched
-        ]
-        zip_bytes = await asyncio.to_thread(file_service.create_zip, file_pairs)
-        zip_name = f"{query}_검색결과.zip"
-        names = "\n".join(f"• {f.original_name}" for f in matched)
-        if channel_id:
-            await slack_service.upload_file(channel_id, zip_name, zip_bytes, f"검색된 파일 {len(matched)}개를 zip으로 묶었습니다.")
-        return f"파일 {len(matched)}개를 zip으로 보냈습니다.\n{names}"
+        # 여러 파일 → 개별 전송
+        sent = []
+        for f in matched:
+            content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
+            if channel_id:
+                await slack_service.upload_file(channel_id, f.original_name, content)
+            sent.append(f.original_name)
+        names = "\n".join(f"• {n}" for n in sent)
+        return f"파일 {len(sent)}개를 보냈습니다.\n{names}"
 
     @langchain_tool
     async def list_files() -> str:
@@ -441,24 +439,22 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 await slack_service.upload_file(channel_id, f.original_name, content, f"{category} 카테고리 파일입니다.")
             return f"*{category}* 카테고리 파일 1개를 보냈습니다: {f.original_name}"
 
-        # 여러 개 → zip으로 묶어 전송
-        file_pairs = []
+        # 여러 개 → 개별 전송
+        sent = []
         for f in files:
             try:
                 content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
-                file_pairs.append((f.original_name, content))
+                if channel_id:
+                    await slack_service.upload_file(channel_id, f.original_name, content)
+                sent.append(f.original_name)
             except Exception as e:
                 logger.warning("[tool] find_files_by_category read failed %s: %s", f.original_name, e)
 
-        if not file_pairs:
+        if not sent:
             return "파일을 읽는 중 오류가 발생했습니다."
 
-        zip_bytes = await asyncio.to_thread(file_service.create_zip, file_pairs)
-        zip_name = f"{category}_파일묶음.zip"
-        if channel_id:
-            await slack_service.upload_file(channel_id, zip_name, zip_bytes, f"{category} 카테고리 파일 {len(file_pairs)}개입니다.")
-        names = "\n".join(f"• {n}" for n, _ in file_pairs)
-        return f"*{category}* 카테고리 파일 {len(file_pairs)}개를 zip으로 묶어 보냈습니다.\n{names}"
+        names = "\n".join(f"• {n}" for n in sent)
+        return f"*{category}* 카테고리 파일 {len(sent)}개를 보냈습니다.\n{names}"
 
     @langchain_tool
     async def set_file_category(filename: str, category: str) -> str:
