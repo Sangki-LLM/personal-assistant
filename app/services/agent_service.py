@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 # 확인 대기 중인 지출 기록 요청: user_id → {amount, category, memo}
 _pending_expense: dict[str, dict] = {}
+# 삭제 확인 대기 중인 파일 후보: user_id → [UserFile, ...]
+_pending_delete: dict[str, list] = {}
 # 대화 히스토리: user_id → [(user_msg, assistant_reply), ...]
 _chat_histories: dict[str, list[tuple[str, str]]] = {}
 
@@ -78,6 +80,7 @@ def _build_system_prompt() -> str:
 | 특정 카테고리 파일 전체 요청 ("업무 파일 다 줘") | find_files_by_category |
 | 파일 카테고리 설정·변경 | set_file_category |
 | 저장된 카테고리 목록 조회 | list_categories |
+| 파일 삭제 ("파일 지워줘", "삭제해줘") — 후보 목록 표시 후 정확한 파일명 확인 | delete_file |
 
 **날짜 변환 (오늘={today} 기준):**
 - "다음주 토요일" → 실제 YYYY-MM-DD 계산 후 전달
@@ -460,6 +463,35 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return "설정된 카테고리가 없습니다."
         return "카테고리 목록:\n" + "\n".join(f"• {c}" for c in categories)
 
+    @langchain_tool
+    async def delete_file(query: str) -> str:
+        """파일 삭제 요청 시 후보 목록을 먼저 보여줍니다. 사용자가 정확한 파일명을 입력하면 삭제됩니다. query: 파일명·카테고리·날짜 등"""
+        logger.info("[tool] delete_file user=%s query=%s", user_id, query[:50])
+        from app.core.database import AsyncSessionLocal
+        from app.services import file_service
+
+        filenames = await file_service.search_files(user_id, query, n=10)
+        if not filenames:
+            return "관련 파일을 찾지 못했습니다."
+
+        async with AsyncSessionLocal() as db:
+            candidates = [
+                f for fn in filenames
+                for f in [await file_service.get_file_by_name(db, user_id, fn)]
+                if f
+            ]
+
+        if not candidates:
+            return "관련 파일을 찾지 못했습니다."
+
+        _pending_delete[user_id] = candidates
+        lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})" for f in candidates]
+        return (
+            "🗑️ 다음 파일이 검색됐습니다. *삭제할 파일명을 정확히 입력*해주세요.\n\n"
+            + "\n".join(lines)
+            + "\n\n취소하려면 '취소'를 입력하세요."
+        )
+
     return [
         search_memory, save_memory, query_knowledge_graph, get_weather, summarize_url,
         add_calendar_event, list_calendar_events,
@@ -468,6 +500,7 @@ def _make_tools(user_id: str, channel_id: str = ""):
         add_todo, list_todos, complete_todo,
         web_search, find_file, list_files,
         find_files_by_category, set_file_category, list_categories,
+        delete_file,
     ]
 
 

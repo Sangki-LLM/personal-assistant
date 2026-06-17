@@ -70,6 +70,33 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     if not text:
         return
 
+    # 파일 삭제 확인 대기 중이면 파일명 일치 여부 처리
+    if user_id in agent_service._pending_delete:
+        candidates = agent_service._pending_delete[user_id]
+        candidate_names = [f.original_name for f in candidates]
+
+        if text in _NO or text == "취소":
+            agent_service._pending_delete.pop(user_id)
+            await slack_service.send_message(channel_id, "삭제를 취소했습니다.")
+            return
+
+        if text in candidate_names:
+            agent_service._pending_delete.pop(user_id)
+            from app.core.database import AsyncSessionLocal
+            from app.services import file_service
+            async with AsyncSessionLocal() as db:
+                result = await file_service.delete_file(db, user_id, text)
+            await slack_service.send_message(channel_id, result)
+            return
+
+        # 정확히 일치하지 않으면 목록 재안내
+        lines = "\n".join(f"• {n}" for n in candidate_names)
+        await slack_service.send_message(
+            channel_id,
+            f"파일명이 정확히 일치하지 않습니다. 아래 목록에서 *정확한 파일명*을 입력해주세요.\n\n{lines}\n\n취소: '취소'",
+        )
+        return
+
     # 지출 기록 대기 중이면 예/아니오 처리
     if user_id in agent_service._pending_expense:
         pending = agent_service._pending_expense.pop(user_id)

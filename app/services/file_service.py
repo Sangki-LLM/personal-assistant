@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import re
 import time
 import zipfile
@@ -289,6 +290,36 @@ async def list_all_files(db: AsyncSession, user_id: str) -> list[UserFile]:
         select(UserFile).where(UserFile.user_id == user_id).order_by(UserFile.updated_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def delete_file(db: AsyncSession, user_id: str, filename: str) -> str:
+    """파일을 로컬 + DB + ChromaDB에서 삭제한다."""
+    result = await db.execute(
+        select(UserFile).where(UserFile.user_id == user_id, UserFile.original_name == filename)
+    )
+    file_record = result.scalar_one_or_none()
+    if not file_record:
+        return f"'{filename}' 파일을 찾을 수 없습니다."
+
+    try:
+        os.remove(file_record.stored_path)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning("[file] local delete failed %s: %s", filename, e)
+
+    try:
+        safe_id = user_id.replace("-", "_")
+        col = _client().get_or_create_collection(name=f"files_{safe_id}", metadata={"hnsw:space": "cosine"})
+        col.delete(ids=[file_record.chroma_id])
+        _indexes.pop(user_id, None)
+    except Exception as e:
+        logger.warning("[file] chroma delete failed %s: %s", filename, e)
+
+    await db.delete(file_record)
+    await db.commit()
+    logger.info("[file] deleted filename=%s user=%s", filename, user_id)
+    return f"🗑️ *{filename}* 삭제했습니다."
 
 
 def read_file_bytes(stored_path: str) -> bytes:
