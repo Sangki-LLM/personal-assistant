@@ -384,8 +384,17 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 await slack_service.upload_file(channel_id, f.original_name, content, "요청하신 파일입니다.")
             return f"*{f.original_name}* 파일을 보냈습니다."
 
-        lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})" for f in matched[:5]]
-        return "찾은 파일 목록:\n" + "\n".join(lines) + "\n\n더 구체적으로 파일명이나 날짜를 알려주세요."
+        # 여러 파일 → zip으로 묶어 바로 전송
+        file_pairs = [
+            (f.original_name, await asyncio.to_thread(file_service.read_file_bytes, f.stored_path))
+            for f in matched
+        ]
+        zip_bytes = await asyncio.to_thread(file_service.create_zip, file_pairs)
+        zip_name = f"{query}_검색결과.zip"
+        names = "\n".join(f"• {f.original_name}" for f in matched)
+        if channel_id:
+            await slack_service.upload_file(channel_id, zip_name, zip_bytes, f"검색된 파일 {len(matched)}개를 zip으로 묶었습니다.")
+        return f"파일 {len(matched)}개를 zip으로 보냈습니다.\n{names}"
 
     @langchain_tool
     async def list_files() -> str:

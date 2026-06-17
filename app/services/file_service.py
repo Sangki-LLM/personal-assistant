@@ -39,18 +39,18 @@ def _extract_category(text: str) -> str | None:
     if not text:
         return None
 
-    # 짧고 단순한 단어 → 바로 카테고리
-    if len(text) <= 20:
-        words = set(re.findall(r'[가-힣]+', text))
-        if not (words & _IGNORE_WORDS) and _CATEGORY_PATTERN.match(text):
-            return text
-
-    # 문장에서 "X로 저장/분류" 패턴 추출
+    # "X로 저장/분류" 문장 패턴 우선 시도 (짧은 텍스트도 포함)
     m = _CATEGORY_SENTENCE_PATTERN.search(text)
     if m:
         cat = m.group(1).strip()
         if cat:
             return cat
+
+    # 짧고 단순한 단어 직접 입력
+    if len(text) <= 15:
+        words = set(re.findall(r'[가-힣]+', text))
+        if not (words & _IGNORE_WORDS) and _CATEGORY_PATTERN.match(text):
+            return text
 
     return None
 
