@@ -75,12 +75,17 @@ def _build_system_prompt() -> str:
 | 날씨 질문 ("~~ 날씨", "날씨 어때") | get_weather(location=지역명) |
 | URL이 포함된 메시지 | summarize_url |
 | 최신 정보·검색 필요 | web_search |
-| 저장된 파일 검색·요청 ("파일 줘", "문서 보내줘") | find_file |
-| 저장된 파일 전체 목록 조회 | list_files |
-| 특정 카테고리 파일 전체 요청 ("업무 파일 다 줘") | find_files_by_category |
+| 파일 목록만 보여달라 ("파일 목록", "어떤 파일", "뭐 있어") | list_files 또는 find_files_by_category(list_only=True) |
+| 파일 전송 요청 ("파일 줘", "보내줘", "전송해줘") | find_file 또는 find_files_by_category |
+| 특정 카테고리 목록만 요청 ("업무 파일 목록", "개인파일 뭐 있어") | find_files_by_category(list_only=True) |
+| 특정 카테고리 파일 전송 요청 ("업무 파일 다 보내줘") | find_files_by_category(list_only=False) |
 | 파일 카테고리 설정·변경 | set_file_category |
 | 저장된 카테고리 목록 조회 | list_categories |
 | 파일 삭제 ("파일 지워줘", "삭제해줘") — 후보 목록 표시 후 정확한 파일명 확인 | delete_file |
+
+**파일 목록 vs 파일 전송 구분 — 반드시 준수:**
+- "목록", "뭐 있어", "어떤 거", "보여줘" → list_only=True (파일 전송 금지)
+- "줘", "보내줘", "전송해줘", "올려줘" → list_only=False (파일 실제 전송)
 
 **날짜 변환 (오늘={today} 기준):**
 - "다음주 토요일" → 실제 YYYY-MM-DD 계산 후 전달
@@ -357,9 +362,9 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return "웹 검색 시간 초과."
 
     @langchain_tool
-    async def find_file(query: str, as_zip: bool = False) -> str:
-        """저장된 파일을 이름, 날짜, 종류로 검색해서 Slack으로 전송합니다. query: 파일명·날짜·종류 등. as_zip: 사용자가 zip으로 묶어달라고 했으면 True"""
-        logger.info("[tool] find_file user=%s query=%s as_zip=%s", user_id, query[:50], as_zip)
+    async def find_file(query: str, list_only: bool = False, as_zip: bool = False) -> str:
+        """저장된 파일을 검색합니다. list_only=True면 목록만 반환(파일 전송 안 함). as_zip=True면 zip으로 묶어 전송."""
+        logger.info("[tool] find_file user=%s query=%s list_only=%s as_zip=%s", user_id, query[:50], list_only, as_zip)
         from app.core.database import AsyncSessionLocal
         from app.services import file_service, slack_service
 
@@ -376,6 +381,10 @@ def _make_tools(user_id: str, channel_id: str = ""):
 
         if not matched:
             return "관련 파일을 찾지 못했습니다."
+
+        if list_only:
+            lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})" for f in matched]
+            return f"검색된 파일 ({len(matched)}개):\n" + "\n".join(lines)
 
         if len(matched) == 1:
             f = matched[0]
@@ -395,7 +404,6 @@ def _make_tools(user_id: str, channel_id: str = ""):
             names = "\n".join(f"• {f.original_name}" for f in matched)
             return f"파일 {len(file_pairs)}개를 zip으로 묶어 보냈습니다.\n{names}"
 
-        # 기본: 개별 전송
         sent = []
         for f in matched:
             content = await asyncio.to_thread(file_service.read_file_bytes, f.stored_path)
@@ -431,9 +439,9 @@ def _make_tools(user_id: str, channel_id: str = ""):
         return "\n".join(lines)
 
     @langchain_tool
-    async def find_files_by_category(category: str, as_zip: bool = False) -> str:
-        """특정 카테고리의 파일 전체를 Slack으로 전송합니다. category: 카테고리명. as_zip: 사용자가 zip으로 묶어달라고 했으면 True"""
-        logger.info("[tool] find_files_by_category user=%s category=%s as_zip=%s", user_id, category, as_zip)
+    async def find_files_by_category(category: str, list_only: bool = False, as_zip: bool = False) -> str:
+        """특정 카테고리의 파일을 조회합니다. list_only=True면 목록만 반환(파일 전송 안 함). as_zip=True면 zip으로 묶어 전송."""
+        logger.info("[tool] find_files_by_category user=%s category=%s list_only=%s as_zip=%s", user_id, category, list_only, as_zip)
         from app.core.database import AsyncSessionLocal
         from app.services import file_service, slack_service
 
@@ -442,6 +450,10 @@ def _make_tools(user_id: str, channel_id: str = ""):
 
         if not files:
             return f"*{category}* 카테고리에 저장된 파일이 없습니다."
+
+        if list_only:
+            lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})" for f in files]
+            return f"*{category}* 카테고리 파일 ({len(files)}개):\n" + "\n".join(lines)
 
         if len(files) == 1:
             f = files[0]
@@ -466,7 +478,6 @@ def _make_tools(user_id: str, channel_id: str = ""):
             names = "\n".join(f"• {n}" for n, _ in file_pairs)
             return f"*{category}* 카테고리 파일 {len(file_pairs)}개를 zip으로 묶어 보냈습니다.\n{names}"
 
-        # 기본: 개별 전송
         sent = []
         for f in files:
             try:
