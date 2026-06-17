@@ -398,8 +398,19 @@ def _make_tools(user_id: str, channel_id: str = ""):
             files = await file_service.list_all_files(db, user_id)
         if not files:
             return "저장된 파일이 없습니다."
-        lines = [f"• {f.original_name} ({f.updated_at.strftime('%Y-%m-%d %H:%M')})" for f in files]
-        return f"저장된 파일 ({len(files)}개):\n" + "\n".join(lines)
+
+        from collections import defaultdict
+        groups: dict[str, list] = defaultdict(list)
+        for f in files:
+            key = f.category or "미분류"
+            groups[key].append(f)
+
+        lines = [f"저장된 파일 ({len(files)}개):"]
+        for cat, cat_files in sorted(groups.items()):
+            lines.append(f"\n📁 *{cat}* ({len(cat_files)}개)")
+            for f in cat_files:
+                lines.append(f"  • {f.original_name} ({f.updated_at.strftime('%Y-%m-%d')})")
+        return "\n".join(lines)
 
     @langchain_tool
     async def find_files_by_category(category: str) -> str:
