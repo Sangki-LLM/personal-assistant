@@ -634,54 +634,6 @@ async def _prefetch_memory(user_id: str, message: str) -> str:
         return message
 
 
-async def _auto_save_memory(user_id: str, user_message: str, agent_reply: str) -> None:
-    """대화에서 중요 정보를 추출해 자동으로 ChromaDB에 저장한다."""
-    import re as _re
-    try:
-        prompt = (
-            f"다음 대화에서 나중에 참고할 **영구적인 사실 정보**가 있으면 '주어: 정보' 형태로 한 줄만 써줘. "
-            f"사실 정보가 없으면 아무것도 쓰지 마. 설명이나 prefix 없이 정보만 써줘.\n\n"
-            f"**절대 저장하지 말 것 (실시간·변동 데이터):**\n"
-            f"- 주가, 코인 가격, 코스피/나스닥/환율 등 지수·시세\n"
-            f"- 날씨, 기온, 미세먼지 등 기상 정보\n"
-            f"- 오늘의 뉴스, 검색 결과, 일시적 정보\n"
-            f"- 리마인더·알림 설정 내용\n"
-            f"- 할 일(Todo) 목록\n\n"
-            f"**저장할 것 (영구 정보):**\n"
-            f"- 사람 이름, 연락처, 생일, 관계\n"
-            f"- 장소, 업체명, 주소\n"
-            f"- 사용자의 취향·선호·습관\n"
-            f"- 반복적으로 필요한 개인 정보\n\n"
-            f"사용자: {user_message[:500]}\n"
-            f"비서: {agent_reply[:500]}\n\n정보:"
-        )
-        llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
-        resp = await asyncio.wait_for(llm.ainvoke(prompt), timeout=20)
-        content = resp.content
-        if isinstance(content, list):
-            extracted = " ".join(
-                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-            ).strip()
-        else:
-            extracted = (content or "").strip()
-        # LLM이 프롬프트 prefix를 붙여 반환하는 경우 제거
-        extracted = _re.sub(r'^(정보:?|사실:?|핵심\s*정보[^:]*:?)\s*', '', extracted).strip()
-        # 무의미한 응답 필터 (없음, null, N/A, 내용 없음, 오류 관련 등)
-        _EMPTY = _re.compile(
-            r'^[\(\[\s]*(없음|없어|없다|null|n/a|해당\s*없음|정보\s*없음|내용\s*없음|빈\s*문자열|없습니다|저장\s*불필요|오류|error)[\)\]\s\?\.]*$',
-            _re.IGNORECASE,
-        )
-        if not extracted or len(extracted) <= 5 or _EMPTY.match(extracted):
-            logger.debug("[agent] auto_save_memory skipped: empty or meaningless (%r)", extracted[:30])
-            return
-        from app.services import memory_service
-        await memory_service.store_memory(user_id, extracted)
-        logger.info("[agent] auto_save_memory extracted=%r", extracted[:80])
-    except asyncio.TimeoutError:
-        logger.warning("[agent] auto_save_memory timeout (20s)")
-    except Exception as e:
-        logger.warning("[agent] auto_save_memory failed (%s): %s", type(e).__name__, e)
-
 
 async def chat(user_id: str, message: str, channel_id: str = "") -> str:
     """Gemini 우선 사용, 할당량 초과 시 Ollama로 자동 전환."""
