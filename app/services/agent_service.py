@@ -266,23 +266,21 @@ def _make_tools(user_id: str, channel_id: str = ""):
 
     @langchain_tool
     async def set_reminder(message: str, datetime_str: str) -> str:
-        """특정 시간에 Slack 알림을 설정합니다. datetime_str: 'YYYY-MM-DD HH:MM' 또는 '30분 후', '1시간 후'"""
-        import re
-        from datetime import datetime, timedelta
+        """특정 시간에 Slack 알림을 설정합니다. datetime_str: '30분 후', '다음주 월요일 오전 10시', '내일 오후 3시', 'YYYY-MM-DD HH:MM' 등 자연어 표현 가능"""
+        import dateparser
+        from datetime import datetime
         from app.core.database import AsyncSessionLocal
         from app.services import reminder_service as rs
 
         logger.info("[tool] set_reminder message=%s datetime=%s", message[:40], datetime_str)
         now = datetime.now()
-        m = re.search(r"(\d+)\s*(분|시간)", datetime_str)
-        if m:
-            val, unit = int(m.group(1)), m.group(2)
-            run_at = now + (timedelta(minutes=val) if unit == "분" else timedelta(hours=val))
-        else:
-            try:
-                run_at = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
-            except ValueError:
-                return "시간 형식을 인식하지 못했습니다. 예: '30분 후', '2026-06-12 15:00'"
+        run_at = dateparser.parse(
+            datetime_str,
+            languages=["ko", "en"],
+            settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now, "RETURN_AS_TIMEZONE_AWARE": False},
+        )
+        if not run_at:
+            return "시간 형식을 인식하지 못했습니다. 예: '30분 후', '다음주 월요일 오전 10시', '2026-06-12 15:00'"
 
         async with AsyncSessionLocal() as db:
             result = await rs.set_reminder(db, user_id, message, run_at)

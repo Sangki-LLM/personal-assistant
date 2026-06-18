@@ -91,7 +91,14 @@ class _LinkExtractor(HTMLParser):
 
 
 def _strip_html(html: str) -> str:
-    html = re.sub(r"<(script|style|nav|header|footer)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    try:
+        import trafilatura
+        extracted = trafilatura.extract(html, include_comments=False, include_tables=False)
+        if extracted:
+            return extracted
+    except Exception:
+        pass
+    # fallback: 기본 태그 제거
     text = re.sub(r"<[^>]+>", " ", html)
     return re.sub(r"\s+", " ", text).strip()
 

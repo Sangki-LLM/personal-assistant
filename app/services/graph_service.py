@@ -1,8 +1,8 @@
 import asyncio
-import json
 import logging
-import re
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from llama_index.core.graph_stores import SimplePropertyGraphStore
 from llama_index.core.graph_stores.types import EntityNode, Relation
@@ -12,6 +12,16 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _GRAPH_DIR = Path("./graph_store")
+
+
+class _Triplet(BaseModel):
+    entity: str
+    attribute: str
+    value: str
+
+
+class _TripletList(BaseModel):
+    items: list[_Triplet] = []
 _graph_stores: dict[str, SimplePropertyGraphStore] = {}
 
 
@@ -38,13 +48,11 @@ def _save_store(user_id: str) -> None:
 async def _extract_triplets(text: str) -> list[dict]:
     """LLM으로 텍스트에서 (entity, attribute, value) 트리플렛 추출."""
     prompt = (
-        "다음 문장에서 '주체-속성-값' 형태의 사실 정보를 JSON 배열로 추출해줘.\n"
-        "형식: [{\"entity\": \"주체명\", \"attribute\": \"속성\", \"value\": \"값\"}]\n"
-        "추출할 게 없으면 [] 반환. 설명 없이 JSON만 반환.\n\n"
+        "다음 문장에서 '주체-속성-값' 형태의 사실 정보를 추출해줘.\n"
+        "추출할 게 없으면 items를 빈 배열로 반환.\n\n"
         f"문장: {text}"
     )
     try:
-        from langchain_core.messages import HumanMessage
         if settings.gemini_api_key:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(
@@ -54,16 +62,9 @@ async def _extract_triplets(text: str) -> list[dict]:
             from langchain_ollama import ChatOllama
             llm = ChatOllama(model=settings.ollama_model, base_url=settings.ollama_host, think=False)
 
-        resp = await asyncio.wait_for(llm.ainvoke([HumanMessage(content=prompt)]), timeout=15)
-        raw = resp.content
-        if isinstance(raw, list):
-            content = " ".join(b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text")
-        else:
-            content = (raw or "")
-        content = content.strip()
-        m = re.search(r"\[.*\]", content, re.DOTALL)
-        if m:
-            return json.loads(m.group())
+        structured = llm.with_structured_output(_TripletList)
+        result: _TripletList = await asyncio.wait_for(structured.ainvoke(prompt), timeout=15)
+        return [t.model_dump() for t in result.items]
     except Exception as e:
         logger.warning("[graph] triplet extraction failed: %s", e)
     return []
