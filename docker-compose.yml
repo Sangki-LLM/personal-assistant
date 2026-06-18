@@ -8,6 +8,7 @@ services:
     volumes:
       - /var/lib/jenkins/personal-assistant/credentials.json:/app/credentials.json:ro
       - /var/lib/jenkins/personal-assistant/user_files:/app/user_files
+      - /var/lib/jenkins/personal-assistant/graph_store:/app/graph_store
     environment:
       TZ: Asia/Seoul
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
