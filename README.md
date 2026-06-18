@@ -45,15 +45,71 @@ Slack DM 응답
 
 ---
 
-## 주요 기능
+## 구현 기능
 
-- **장기 기억**: 대화 내용을 ChromaDB에 저장, 벡터 + BM25 하이브리드 검색(RRF)으로 조회
-- **Knowledge Graph**: 대화에서 엔티티-속성-값을 자동 추출해 그래프로 저장
-- **일정 관리**: "다음 주 화요일 오후 2시 치과 예약해줘" → Google Calendar 자동 등록
-- **지출 기록**: "스타벅스 6500원" → Google Sheets 자동 기록
-- **리마인더**: "30분 후 약 먹으라고 알려줘" → APScheduler로 예약 후 DM 발송
-- **파일 저장소**: Slack으로 보낸 파일을 저장하고 자연어로 검색·전송
-- **뉴스 브리핑**: 설정한 뉴스 사이트를 LLM으로 요약해 매일 DM 전송
+### 1. 기초 구조 — FastAPI + LangGraph + Slack
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-intro)
+
+- Slack Events API 수신 후 `BackgroundTasks`로 즉시 200 반환, 백그라운드에서 에이전트 실행
+- `@langchain_tool` 데코레이터로 도구 정의, `user_id`는 클로저로 바인딩
+- bot_id 체크로 봇 응답 이벤트 무한루프 방지
+
+### 2. 장기 기억 — ChromaDB + Ollama 임베딩
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-memory)
+
+- 대화 내용을 ChromaDB에 벡터로 저장, 매 대화 전 자동 검색 후 메시지 앞에 주입
+- ChromaDB HttpClient 싱글톤 관리로 `ResourceWarning` 방지
+
+### 3. Google Calendar·Sheets 연동
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-google)
+
+- 서비스 계정 방식으로 Google API 연동, 동기 라이브러리는 `run_in_executor`로 스레드풀 실행
+- "다음 주 화요일 오후 2시 치과 예약해줘" → Calendar 자동 등록
+- "스타벅스 6500원" → Sheets 자동 기록
+
+### 4. 할 일 목록과 리마인더
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-todo-reminder)
+
+- APScheduler 1분 polling 기반 리마인더, 취소 시 `fired=True` 처리로 이력 보존
+- "30분 후 약 먹으라고 알려줘" → 자동 예약 후 DM 발송
+
+### 5. LLM 전략 — Gemini 우선, Ollama 폴백
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-llm-strategy)
+
+- Gemini 할당량 초과(429) 감지 시 Ollama로 자동 폴백하는 이중화 전략
+- `think=False`로 Ollama 내부 추론 출력 제거
+
+### 6. 기억 시스템 디버깅
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-memory-debug)
+
+- LLM 프롬프트 오염으로 ChromaDB에 쓰레기 데이터 저장되는 문제 발견·수정
+- Slack Block Kit 확인 버튼으로 저장 전 사용자 확인 UX 구현
+
+### 7. BM25 한국어 복합어 문제
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-korean-bm25)
+
+- "내차가"를 "차"로 매칭하지 못하는 BM25 한국어 문제 해결
+- 2-gram + 음절 단위 토큰 추가로 형태소 분석기 없이 부분 매칭 구현
+
+### 8. LlamaIndex 도입 — 기억 검색 + Knowledge Graph
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-llamaindex)
+
+- `QueryFusionRetriever(mode="reciprocal_rerank")`로 벡터 + BM25 RRF 하이브리드 검색
+- 대화 5턴 초과 시 오래된 대화를 LLM으로 요약, 최근 3턴 원문 유지
+- `SimplePropertyGraphStore`로 엔티티-속성-값 Knowledge Graph 저장
+
+### 9. Slack 파일 저장소
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-file-storage)
+
+- 파일 내용이 아닌 파일명·카테고리·날짜를 ChromaDB에 임베딩 — 이진 파일 파싱 불필요
+- "회의록 파일 줘"처럼 자연어로 파일 검색·전송
+- `difflib.get_close_matches`로 파일명 퍼지 매칭 삭제 지원
+
+### 10. 한국어 처리 개선 — kiwipiepy 형태소 분석기
+> [📝 블로그](https://sangkihan.github.io/posts/personal-assistant-kiwipiepy)
+
+- 카테고리 추출·BM25 토크나이저·긍정/부정 판별의 정규식을 형태소 분석으로 교체
+- `app/core/kiwi.py` 싱글톤으로 세 서비스가 Kiwi 인스턴스 공유
 
 ---
 
@@ -117,19 +173,3 @@ services:
     image: mysql:8
 ```
 
----
-
-## 블로그
-
-구축 과정 전체를 시리즈로 정리했습니다.
-
-- [전체 인덱스 — FastAPI + LangGraph로 만든 AI 에이전트](https://sangkihan.github.io/posts/personal-assistant-intro)
-- [장기 기억 — ChromaDB + Ollama 임베딩](https://sangkihan.github.io/posts/personal-assistant-memory)
-- [Google Calendar·Sheets 연동](https://sangkihan.github.io/posts/personal-assistant-google)
-- [할 일 목록과 리마인더](https://sangkihan.github.io/posts/personal-assistant-todo-reminder)
-- [LLM 전략 — Gemini 우선, Ollama 폴백](https://sangkihan.github.io/posts/personal-assistant-llm-strategy)
-- [기억 시스템 디버깅](https://sangkihan.github.io/posts/personal-assistant-memory-debug)
-- [BM25 한국어 복합어 문제](https://sangkihan.github.io/posts/personal-assistant-korean-bm25)
-- [LlamaIndex 도입 — 기억 검색 + Knowledge Graph](https://sangkihan.github.io/posts/personal-assistant-llamaindex)
-- [Slack 파일 저장소](https://sangkihan.github.io/posts/personal-assistant-file-storage)
-- [한국어 처리 개선 — kiwipiepy 형태소 분석기 도입](https://sangkihan.github.io/posts/personal-assistant-kiwipiepy)
