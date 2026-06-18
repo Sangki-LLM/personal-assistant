@@ -9,6 +9,7 @@ dependencies = [
     "apscheduler>=3.10",
     "chromadb>=0.6.0",
     "dateparser>=1.1.0",
+    "kiwipiepy>=0.20.0",
     "ddgs>=1.0.0",
     "trafilatura>=2.0.0",
     "fastapi>=0.136.3",

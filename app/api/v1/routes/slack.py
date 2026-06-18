@@ -7,6 +7,7 @@ import time
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 
 from app.core.config import settings
+from app.core import kiwi as _kiwi_mod
 from app.services import agent_service, slack_service
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,28 @@ router = APIRouter(prefix="/slack", tags=["slack"])
 
 _YES = {"예", "네", "ㅇㅇ", "응", "좋아", "맞아", "ㅇ", "ok", "OK", "그래"}
 _NO = {"아니오", "아니", "아냐", "ㄴ", "취소", "no", "No", "NO", "싫어"}
+_YES_STEMS = {"응", "네", "맞", "좋"}
+_NO_STEMS = {"아니", "싫"}
+
+
+def _is_affirmative(text: str) -> bool:
+    if text in _YES or text.lower() in {"ok", "yes"}:
+        return True
+    try:
+        tokens = _kiwi_mod.get().tokenize(text)
+        return any(t.form in _YES_STEMS for t in tokens)
+    except Exception:
+        return False
+
+
+def _is_negative(text: str) -> bool:
+    if text in _NO:
+        return True
+    try:
+        tokens = _kiwi_mod.get().tokenize(text)
+        return any(t.form in _NO_STEMS for t in tokens)
+    except Exception:
+        return False
 
 
 def _verify_slack_signature(body: bytes, timestamp: str, signature: str) -> bool:
@@ -66,7 +89,7 @@ async def _handle_event(event: dict, channel_id: str) -> None:
         candidates = agent_service._pending_delete[user_id]
         candidate_names = [f.original_name for f in candidates]
 
-        if text in _NO or text == "취소":
+        if _is_negative(text):
             agent_service._pending_delete.pop(user_id)
             await slack_service.send_message(channel_id, "삭제를 취소했습니다.")
             return
@@ -102,7 +125,7 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     # 지출 기록 대기 중이면 예/아니오 처리
     if user_id in agent_service._pending_expense:
         pending = agent_service._pending_expense.pop(user_id)
-        if text in _YES:
+        if _is_affirmative(text):
             from app.services import expense_service
             result = expense_service.add_expense(
                 pending["amount"], pending["category"], pending["memo"]

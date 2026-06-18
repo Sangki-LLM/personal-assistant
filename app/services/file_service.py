@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-import re
 import time
 import zipfile
 from datetime import datetime
@@ -16,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core import kiwi as _kiwi_mod
 from app.models.user_file import FileBundle, UserFile
 
 logger = logging.getLogger(__name__)
@@ -25,13 +25,9 @@ _indexes: dict[str, VectorStoreIndex] = {}
 
 LlamaSettings.llm = None
 
-# 카테고리 추론: 짧은 단어 직접 입력 또는 "X로 저장/분류" 문장 패턴
-_CATEGORY_PATTERN = re.compile(r'^[가-힣A-Za-z0-9 _\-]{1,20}$')
-_IGNORE_WORDS = {"저장", "해줘", "이거", "파일", "문서", "보내", "올려", "넣어", "주세요", "좀"}
-# "KB태양광 업무로 저장해줘" → "KB태양광 업무"
-_CATEGORY_SENTENCE_PATTERN = re.compile(
-    r'([가-힣A-Za-z0-9 _\-]{1,20})(?:으로|로|에)\s*(?:저장|분류|파일|묶어)'
-)
+_CAT_ACTION_NOUNS = {"저장", "분류", "묶"}
+_CAT_PARTICLES = {"에", "로", "으로"}
+_CAT_NOUN_TAGS = {"NNG", "NNP", "SL"}
 
 
 def _extract_category(text: str) -> str | None:
@@ -39,18 +35,26 @@ def _extract_category(text: str) -> str | None:
     if not text:
         return None
 
-    # "X로 저장/분류" 문장 패턴 우선 시도 (짧은 텍스트도 포함)
-    m = _CATEGORY_SENTENCE_PATTERN.search(text)
-    if m:
-        cat = m.group(1).strip()
-        if cat:
-            return cat
+    try:
+        tokens = _kiwi_mod.get().tokenize(text)
 
-    # 짧고 단순한 단어 직접 입력
-    if len(text) <= 15:
-        words = set(re.findall(r'[가-힣]+', text))
-        if not (words & _IGNORE_WORDS) and _CATEGORY_PATTERN.match(text):
-            return text
+        # "X에/로/으로 저장/분류/묶" 패턴 — 조사 앞 명사구를 카테고리로 추출
+        for i, tok in enumerate(tokens):
+            if tok.form in _CAT_PARTICLES:
+                following = {t.form for t in tokens[i + 1: i + 4]}
+                if following & _CAT_ACTION_NOUNS:
+                    noun_parts = [t.form for t in tokens[:i] if t.tag in _CAT_NOUN_TAGS]
+                    if noun_parts:
+                        return " ".join(noun_parts).strip()
+
+        # 짧은 텍스트에서 용언·어미 없이 명사만 있을 때 직접 카테고리로
+        has_predicate = any(t.tag.startswith(("V", "E", "X")) for t in tokens)
+        if not has_predicate and len(text) <= 15:
+            noun_parts = [t.form for t in tokens if t.tag in _CAT_NOUN_TAGS]
+            if noun_parts:
+                return " ".join(noun_parts).strip()
+    except Exception:
+        pass
 
     return None
 

@@ -3,6 +3,7 @@ import re
 import time
 
 import chromadb
+from app.core import kiwi as _kiwi_mod
 from llama_index.core import Document, Settings as LlamaSettings, StorageContext, VectorStoreIndex
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.schema import TextNode
@@ -57,15 +58,17 @@ def _raw_collection(user_id: str):
     )
 
 
+_BM25_KEEP_TAGS = {"NNG", "NNP", "VV", "VA", "SL", "XR"}
+
+
 def _tokenize(text: str) -> list[str]:
-    tokens = re.findall(r"[A-Za-z가-힣0-9]+", text.lower())
-    korean_words = re.findall(r"[가-힣]+", text)
-    extra: list[str] = []
-    for word in korean_words:
-        for i in range(len(word) - 1):
-            extra.append(word[i : i + 2])
-        extra.extend(list(word))
-    return tokens + extra
+    try:
+        morphs = _kiwi_mod.get().tokenize(text)
+        result = [t.form.lower() for t in morphs if t.tag in _BM25_KEEP_TAGS and len(t.form) > 1]
+    except Exception:
+        result = []
+    result += re.findall(r"[a-z0-9]+", text.lower())
+    return list(dict.fromkeys(result))
 
 
 _JUNK_PATTERNS = re.compile(
@@ -78,6 +81,21 @@ _REALTIME_PATTERNS = re.compile(
     r'\d+\s*(달러|원|엔|유로|위안)\s*$)',
     re.IGNORECASE,
 )
+_JUNK_NEG_STEMS = {"없", "모르", "불명"}
+
+
+def _is_junk_doc(doc: str) -> bool:
+    if _JUNK_PATTERNS.search(doc) or _REALTIME_PATTERNS.search(doc) or len(doc.strip()) <= 5:
+        return True
+    # 짧은 부정 응답 감지 ("해당 정보가 없어요", "잘 모르겠습니다" 등)
+    if len(doc) <= 30:
+        try:
+            tokens = _kiwi_mod.get().tokenize(doc)
+            if any(t.form in _JUNK_NEG_STEMS for t in tokens):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 async def store_memory(user_id: str, text: str) -> None:
@@ -202,7 +220,7 @@ async def purge_junk_memories(user_id: str) -> int:
         junk_ids = [
             doc_id
             for doc_id, doc in zip(all_data["ids"], all_data["documents"])
-            if _JUNK_PATTERNS.search(doc) or _REALTIME_PATTERNS.search(doc) or len(doc.strip()) <= 5
+            if _is_junk_doc(doc)
         ]
         if junk_ids:
             col.delete(ids=junk_ids)
