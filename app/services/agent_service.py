@@ -66,8 +66,11 @@ def _build_system_prompt() -> str:
 | 알림·리마인더 설정 | set_reminder 단독 호출 (add_todo 금지) |
 | 리마인더 목록 조회 | list_reminders |
 | 리마인더 취소 | cancel_reminder |
-| 할 일 추가 (명시적 요청 시에만) | add_todo(content=내용, due_date=YYYY-MM-DD) — 날짜 언급 시 반드시 due_date 포함 |
-| 할 일 목록 조회 | list_todos |
+| 할 일 추가 — 개인 (명시적 요청 시에만) | add_todo(content=내용, due_date=YYYY-MM-DD) |
+| 할 일 추가 — 업무 ("XX 업무에 할일 추가") | add_todo(content=내용, category=카테고리명) |
+| 할 일 전체 목록 조회 | list_todos |
+| 특정 업무 카테고리 할 일 조회 | list_todos_by_category(category=카테고리명) |
+| 업무 카테고리 목록 조회 | list_todo_categories |
 | 할 일 완료 처리 | complete_todo |
 | 과거 대화·정보 질문 | search_memory |
 | 사용자 개인 정보 질문 ("내 ~~이 뭐야", "~~이 언제야") | search_memory |
@@ -148,7 +151,42 @@ def _make_tools(user_id: str, channel_id: str = ""):
     async def summarize_url(url: str) -> str:
         """URL의 내용을 가져와 요약합니다."""
         logger.info("[tool] summarize_url url=%s", url[:80])
+
+        from urllib.parse import urlparse
+        import socket
+        import ipaddress
+
         try:
+            parsed = urlparse(url)
+            if not parsed.hostname:
+                return "유효하지 않은 URL 형식입니다."
+
+            if parsed.scheme not in ("http", "https"):
+                return f"지원하지 않는 프로토콜입니다 ({parsed.scheme}). http 또는 https만 가능합니다."
+
+            # 1. 호스트명을 IP로 변환 (DNS Resolution)
+            loop = asyncio.get_event_loop()
+            try:
+                # gethostbyname은 블로킹 함수이므로 스레드 풀에서 실행
+                ip_str = await loop.run_in_executor(None, socket.gethostbyname, parsed.hostname)
+                ip = ipaddress.ip_address(ip_str)
+            except socket.gaierror:
+                return "URL 주소를 확인할 수 없습니다 (DNS 조회 실패)."
+            except ValueError:
+                return "유효하지 않은 IP 주소 형식입니다."
+
+            # 2. 내부 네트워크 대역 체크 (SSRF 방지)
+            if any([
+                ip.is_private,      # 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                ip.is_loopback,     # 127.0.0.1
+                ip.is_link_local,   # 169.254.0.0/16 (클라우드 메타데이터 등)
+                ip.is_multicast,
+                ip.is_reserved,
+                ip.is_unspecified
+            ]):
+                logger.warning("[security] SSRF attempt blocked: %s (Resolved IP: %s)", url, ip_str)
+                return "보안 정책상 내부 네트워크 주소에는 접근할 수 없습니다."
+
             import httpx
             from html.parser import HTMLParser
 
@@ -306,22 +344,43 @@ def _make_tools(user_id: str, channel_id: str = ""):
             return await rs.cancel_reminder(db, user_id, reminder_id)
 
     @langchain_tool
-    async def add_todo(content: str, due_date: str = "") -> str:
-        """할 일을 추가합니다. due_date: 기한 날짜 YYYY-MM-DD (없으면 빈 문자열)"""
-        logger.info("[tool] add_todo content=%s due=%s", content[:40], due_date)
+    async def add_todo(content: str, due_date: str = "", category: str = "") -> str:
+        """할 일을 추가합니다.
+        - 개인 할일: due_date(YYYY-MM-DD) 지정, category 없음
+        - 업무 할일: category(예: 코오롱 업무) 지정, due_date 없어도 됨
+        """
+        logger.info("[tool] add_todo content=%s due=%s category=%s", content[:40], due_date, category)
         from app.core.database import AsyncSessionLocal
         from app.services import todo_service
         async with AsyncSessionLocal() as db:
-            return await todo_service.add_todo(db, user_id, content, due_date or None)
+            return await todo_service.add_todo(db, user_id, content, due_date or None, category or None)
 
     @langchain_tool
     async def list_todos() -> str:
-        """미완료 할 일 전체 목록을 기한 순으로 조회합니다."""
+        """미완료 할 일 전체 목록을 조회합니다. 업무 카테고리별 + 날짜별로 표시됩니다."""
         logger.info("[tool] list_todos user=%s", user_id)
         from app.core.database import AsyncSessionLocal
         from app.services import todo_service
         async with AsyncSessionLocal() as db:
             return await todo_service.list_todos(db, user_id)
+
+    @langchain_tool
+    async def list_todos_by_category(category: str) -> str:
+        """특정 업무 카테고리의 할 일 목록을 조회합니다. category: 카테고리명 (예: 코오롱 업무)"""
+        logger.info("[tool] list_todos_by_category category=%s", category)
+        from app.core.database import AsyncSessionLocal
+        from app.services import todo_service
+        async with AsyncSessionLocal() as db:
+            return await todo_service.list_todos_by_category(db, user_id, category)
+
+    @langchain_tool
+    async def list_todo_categories() -> str:
+        """등록된 업무 카테고리 목록을 조회합니다."""
+        logger.info("[tool] list_todo_categories user=%s", user_id)
+        from app.core.database import AsyncSessionLocal
+        from app.services import todo_service
+        async with AsyncSessionLocal() as db:
+            return await todo_service.list_todo_categories(db, user_id)
 
     @langchain_tool
     async def complete_todo(todo_id: int) -> str:
@@ -565,7 +624,7 @@ def _make_tools(user_id: str, channel_id: str = ""):
         add_calendar_event, list_calendar_events,
         add_expense, get_expense_summary,
         set_reminder, list_reminders, cancel_reminder,
-        add_todo, list_todos, complete_todo,
+        add_todo, list_todos, list_todos_by_category, list_todo_categories, complete_todo,
         web_search, find_file, list_files,
         find_files_by_category, set_file_category, list_categories,
         delete_file,

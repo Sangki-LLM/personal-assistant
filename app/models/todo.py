@@ -14,4 +14,5 @@ class Todo(Base):
     content: Mapped[str] = mapped_column(Text)
     done: Mapped[bool] = mapped_column(Boolean, default=False)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
