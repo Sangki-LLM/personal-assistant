@@ -42,7 +42,7 @@ async def list_todos(db: AsyncSession, user_id: str) -> str:
     result = await db.execute(
         select(Todo)
         .where(Todo.user_id == user_id, Todo.done == False)
-        .order_by(Todo.category.asc().nulls_last(), func.isnull(Todo.due_date), Todo.due_date.asc(), Todo.created_at.asc())
+        .order_by(func.isnull(Todo.category), Todo.category.asc(), func.isnull(Todo.due_date), Todo.due_date.asc(), Todo.created_at.asc())
     )
     todos = result.scalars().all()
     if not todos:
