@@ -58,8 +58,8 @@ def _build_system_prompt() -> str:
 | 상황 | 호출할 도구 |
 |---|---|
 | "추가해줘", "등록해줘", "예약해줘", "캘린더에 넣어줘" + 날짜/시간 | add_calendar_event |
-| "기억해줘", "메모해줘", "저장해줘" → 날짜가 있어도 save_memory 우선 | save_memory |
-| 이름, 전화번호, 이메일, 생일 등 연락처 정보 | save_memory (형식: "이름: OOO, 전화: ..., 생일: ...") |
+| "기억해줘", "메모해줘", "저장해줘" → 맥락/이벤트/상황 정보 | save_memory |
+| 이름, 전화번호, 이메일, 생일, 주소 등 정형 속성 | save_fact(entity=이름, attribute=속성, value=값) |
 | 일정 조회 요청 | list_calendar_events |
 | 지출·비용·결제 언급 | add_expense |
 | 지출 조회·요약 요청 | get_expense_summary |
@@ -402,6 +402,16 @@ def _make_tools(user_id: str, channel_id: str = ""):
         return f"[Knowledge Graph: {entity}]\n" + "\n".join(results)
 
     @langchain_tool
+    async def save_fact(entity: str, attribute: str, value: str) -> str:
+        """이름·전화번호·생일·주소 등 정형 속성을 Knowledge Graph에 저장합니다.
+        예: entity='또리', attribute='생일', value='2024-03-30'
+        맥락·이벤트·상황 정보는 save_memory를 사용하세요."""
+        logger.info("[tool] save_fact entity=%s attr=%s val=%s", entity, attribute, value)
+        from app.services import graph_service
+        graph_service.save_triplet(user_id, entity, attribute, value)
+        return f"기억했습니다: {entity}의 {attribute} = {value}"
+
+    @langchain_tool
     async def web_search(query: str) -> str:
         """인터넷에서 최신 정보를 검색합니다. LLM이 모르는 최신 정보나 뉴스를 찾을 때 사용하세요."""
         logger.info("[tool] web_search query=%s", query[:50])
@@ -620,7 +630,7 @@ def _make_tools(user_id: str, channel_id: str = ""):
         )
 
     return [
-        search_memory, save_memory, query_knowledge_graph, get_weather, summarize_url,
+        search_memory, save_memory, save_fact, query_knowledge_graph, get_weather, summarize_url,
         add_calendar_event, list_calendar_events,
         add_expense, get_expense_summary,
         set_reminder, list_reminders, cancel_reminder,

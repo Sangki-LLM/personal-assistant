@@ -133,14 +133,6 @@ async def store_memory(user_id: str, text: str) -> None:
         index = _get_index(user_id)
         index.insert(doc)
         logger.info("[memory] stored id=%s user=%s", doc_id, user_id)
-
-        # Knowledge Graph에도 저장 (엔티티-속성-값 추출)
-        try:
-            from app.services import graph_service
-            import asyncio as _asyncio
-            _asyncio.create_task(graph_service.save_to_graph(user_id, text))
-        except Exception:
-            pass
     except Exception as e:
         logger.warning("[memory] store failed: %s", e)
 

@@ -150,6 +150,31 @@ def query_graph(user_id: str, entity_name: str) -> list[str]:
         return []
 
 
+def save_triplet(user_id: str, entity: str, attribute: str, value: str) -> None:
+    """단일 트리플렛을 KG에 직접 저장 (LLM 추출 불필요)."""
+    entity = entity.strip()
+    attribute = attribute.strip()
+    value = value.strip()
+    if not all([entity, attribute, value]):
+        return
+
+    store = _get_store(user_id)
+    existing = store.get(ids=[f"{entity}_Entity"])
+    if existing:
+        props = dict(existing[0].properties or {})
+        props[attribute] = value
+        entity_node = EntityNode(name=entity, label="Entity", properties=props)
+    else:
+        entity_node = EntityNode(name=entity, label="Entity", properties={attribute: value})
+
+    value_node = EntityNode(name=value, label="Value")
+    relation = Relation(source_id=entity_node.id, target_id=value_node.id, label=attribute)
+    store.upsert_nodes([entity_node, value_node])
+    store.upsert_relations([relation])
+    _save_store(user_id)
+    logger.info("[graph] save_triplet entity=%s attr=%s val=%s user=%s", entity, attribute, value, user_id)
+
+
 def list_all_entities(user_id: str) -> list[str]:
     """저장된 모든 엔티티 이름을 반환한다."""
     try:
