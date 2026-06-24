@@ -102,7 +102,7 @@ def _build_system_prompt() -> str:
 
 **응답 방식:**
 - 도구 결과에 `[AGENT_ONLY ...]` 또는 `[AGENT_ONLY - 사용자에게 표시 금지]` 섹션이 있으면 내부 참조용으로만 쓰고 절대 사용자에게 노출하지 마세요
-- 메시지 앞에 `[기억된 정보 (자동 조회)]` 블록이 있으면 그 내용은 ChromaDB에서 이미 검색된 신뢰할 수 있는 기억입니다. search_memory 도구를 따로 호출하지 말고 해당 정보를 바로 사용하세요
+- 메시지 앞에 `[⚠️ 사전 검색된 정보]` 블록이 있으면 참고하세요. KG 결과가 있으면 ChromaDB보다 우선합니다. 두 결과가 충돌하면 KG를 신뢰하세요. 위 정보로 답할 수 없거나 확신이 없으면 search_memory나 query_knowledge_graph를 재호출하세요
 - search_memory 도구 결과가 반환되면 그 내용을 **반드시 신뢰**하고 "없다"고 하지 마세요. 형식이 어색해도 내용 안에 답이 있으면 답변하세요
 - 도구 실행 결과를 먼저 확인한 뒤 간결하게 알려주세요
 - 일정/지출/할 일은 반드시 도구로 기록하고 "등록했어요" 형식으로 답변하세요
@@ -680,21 +680,48 @@ async def _get_history_context(user_id: str) -> str:
 
 
 async def _prefetch_memory(user_id: str, message: str) -> str:
-    """메시지에 관련 기억을 미리 검색해서 컨텍스트로 주입한다."""
+    """ChromaDB + KG 병렬 사전 검색 후 컨텍스트로 주입한다."""
     try:
-        from app.services import memory_service
-        memories = await asyncio.wait_for(
-            memory_service.search_memory(user_id, message),
-            timeout=10,
+        from app.services import memory_service, graph_service
+        from app.core import kiwi as _kiwi_mod
+
+        # ChromaDB 검색
+        memories_task = asyncio.create_task(
+            asyncio.wait_for(memory_service.search_memory(user_id, message), timeout=10)
         )
-        if not memories:
+
+        # Kiwi로 고유명사/일반명사 추출 → KG 조회
+        kg_results: list[str] = []
+        try:
+            morphs = _kiwi_mod.get().tokenize(message)
+            entities = list(dict.fromkeys(
+                t.form for t in morphs if t.tag in ("NNP", "NNG") and len(t.form) > 1
+            ))
+            for entity in entities:
+                results = graph_service.query_graph(user_id, entity)
+                kg_results.extend(results)
+            kg_results = list(dict.fromkeys(kg_results))
+        except Exception as e:
+            logger.warning("[agent] prefetch kg failed: %s", e)
+
+        memories = await memories_task
+
+        parts: list[str] = []
+        if memories:
+            parts.append("[ChromaDB 검색 결과]\n" + "\n".join(f"- {m}" for m in memories))
+        if kg_results:
+            parts.append("[Knowledge Graph 검색 결과 — 구조화된 사실 정보]\n" + "\n".join(f"- {r}" for r in kg_results))
+
+        if not parts:
             return message
-        context = "\n".join(f"- {m}" for m in memories)
-        logger.info("[agent] prefetch_memory found=%d", len(memories))
+
+        logger.info("[agent] prefetch_memory chroma=%d kg=%d", len(memories), len(kg_results))
+        combined = "\n\n".join(parts)
         return (
-            f"[⚠️ 사전 검색된 기억 — 아래 내용은 ChromaDB에 저장된 사실 정보입니다]\n"
-            f"{context}\n"
-            f"[주의] 위 기억에 답이 있으면 search_memory를 재호출하지 말고 바로 답변하세요.\n\n"
+            f"[⚠️ 사전 검색된 정보]\n"
+            f"{combined}\n"
+            f"[주의] KG 결과가 있으면 ChromaDB보다 우선합니다. 두 정보가 충돌하면 KG를 신뢰하세요. "
+            f"위 정보로 답할 수 없으면 search_memory나 query_knowledge_graph를 재호출하세요.\n\n"
             f"[사용자 메시지]\n{message}"
         )
     except Exception as e:
