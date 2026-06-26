@@ -67,9 +67,13 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     if files:
         # 이력서 HTML 템플릿 저장 감지: HTML 파일 1개 + "이력서 틀" 키워드
         _RESUME_KEYWORDS = {"이력서 틀", "이력서틀", "resume template", "이력서 템플릿"}
+        _f0 = files[0] if files else {}
         is_resume_template = (
             len(files) == 1
-            and files[0].get("mimetype", "").startswith("text/html")
+            and (
+                _f0.get("mimetype", "").startswith("text/html")
+                or _f0.get("filetype") == "html"
+            )
             and any(kw in text for kw in _RESUME_KEYWORDS)
         )
 
