@@ -85,12 +85,13 @@ async def _handle_event(event: dict, channel_id: str) -> None:
             and any(kw in text for kw in _PHOTO_KEYWORDS)
         )
 
-        # 채용공고 이미지 감지: 이미지 파일 + "이력서 작성" 키워드 (사진 저장 키워드 제외)
+        # 채용공고 이미지 감지: 이미지 파일(1장 이상) + "이력서 작성" 키워드 (사진 저장 키워드 제외)
         _JOB_IMG_KEYWORDS = {"이력서 작성해줘", "이력서 만들어줘", "이력서 써줘", "이력서 작성"}
+        _img_files = [f for f in files if f.get("mimetype", "").startswith("image/")]
         is_job_posting_image = (
             not is_resume_photo
-            and len(files) == 1
-            and files[0].get("mimetype", "").startswith("image/")
+            and len(_img_files) >= 1
+            and len(_img_files) == len(files)
             and any(kw in text for kw in _JOB_IMG_KEYWORDS)
         )
 
@@ -114,22 +115,26 @@ async def _handle_event(event: dict, channel_id: str) -> None:
             from app.services import file_service as _fs
             from app.core.config import settings as _s
             try:
-                img_bytes = await _fs._download(
-                    files[0].get("url_private") or files[0].get("url_private_download", "")
-                )
                 import base64
                 from langchain_google_genai import ChatGoogleGenerativeAI
                 from langchain_core.messages import HumanMessage as _HM
-                mime = "image/png" if img_bytes[:8] == b'\x89PNG\r\n\x1a\n' else "image/jpeg"
-                b64 = base64.b64encode(img_bytes).decode()
+
                 vlm = ChatGoogleGenerativeAI(model=_s.gemini_model, google_api_key=_s.gemini_api_key)
-                vr = await vlm.ainvoke([_HM(content=[
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                    {"type": "text", "text": "이 이미지에서 채용공고 내용을 모두 추출해줘. 회사명, 담당업무, 자격요건, 우대사항, 근무조건 전부 포함."},
-                ])])
+
+                # 이미지 여러 장을 한 번에 Vision에 전달
+                content_parts: list = []
+                for f in _img_files:
+                    img_bytes = await _fs._download(f.get("url_private") or f.get("url_private_download", ""))
+                    mime = "image/png" if img_bytes[:8] == b'\x89PNG\r\n\x1a\n' else "image/jpeg"
+                    b64 = base64.b64encode(img_bytes).decode()
+                    content_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                content_parts.append({"type": "text", "text": f"이 이미지{'들' if len(_img_files) > 1 else ''}에서 채용공고 내용을 모두 추출해줘. 여러 장이면 순서대로 합쳐서 정리해줘. 회사명, 담당업무, 자격요건, 우대사항, 근무조건 전부 포함."})
+
+                vr = await vlm.ainvoke([_HM(content=content_parts)])
                 c = vr.content
                 extracted = (" ".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text") if isinstance(c, list) else c or "").strip()
                 combined = f"{text}\n\n[채용공고 이미지 내용]\n{extracted}"
+                logger.info("[slack] job posting images=%d extracted_len=%d", len(_img_files), len(extracted))
                 reply = await agent_service.chat(user_id, combined, channel_id)
                 if reply:
                     await slack_service.send_message(channel_id, reply)
