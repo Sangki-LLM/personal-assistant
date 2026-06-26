@@ -9,7 +9,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev
 
-RUN uv run playwright install --with-deps chromium
+RUN sed -i 's|deb.debian.org|cdn-aws.deb.debian.org|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
+    sed -i 's|deb.debian.org|cdn-aws.deb.debian.org|g' /etc/apt/sources.list 2>/dev/null || true && \
+    uv run playwright install --with-deps chromium
 
 COPY app/ ./app/
 COPY app/templates/ ./app/templates/
