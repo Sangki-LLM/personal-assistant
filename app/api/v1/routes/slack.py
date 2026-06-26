@@ -127,8 +127,8 @@ async def _handle_event(event: dict, channel_id: str) -> None:
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
                     {"type": "text", "text": "이 이미지에서 채용공고 내용을 모두 추출해줘. 회사명, 담당업무, 자격요건, 우대사항, 근무조건 전부 포함."},
                 ])])
-                from app.services.agent_service import _extract_text as _et
-                extracted = _et(vr.content).strip()
+                c = vr.content
+                extracted = (" ".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text") if isinstance(c, list) else c or "").strip()
                 combined = f"{text}\n\n[채용공고 이미지 내용]\n{extracted}"
                 reply = await agent_service.chat(user_id, combined, channel_id)
                 if reply:
