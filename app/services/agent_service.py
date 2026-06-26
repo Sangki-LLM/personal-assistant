@@ -198,11 +198,17 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 def __init__(self):
                     super().__init__()
                     self.texts: list[str] = []
+                    self.img_srcs: list[str] = []
                     self._skip = False
 
                 def handle_starttag(self, tag, attrs):
                     if tag in ("script", "style", "head", "nav", "footer"):
                         self._skip = True
+                    if tag == "img":
+                        d = dict(attrs)
+                        src = d.get("src") or d.get("data-src") or d.get("data-lazy-src")
+                        if src:
+                            self.img_srcs.append(src)
 
                 def handle_endtag(self, tag):
                     if tag in ("script", "style", "head", "nav", "footer"):
@@ -215,10 +221,42 @@ def _make_tools(user_id: str, channel_id: str = ""):
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
                 resp.raise_for_status()
+                html_body = resp.text
 
             extractor = _TextExtractor()
-            extractor.feed(resp.text)
+            extractor.feed(html_body)
             raw_text = " ".join(extractor.texts)[:3000]
+
+            # 텍스트가 빈약하면 페이지 내 이미지를 Vision으로 보완
+            if len(raw_text.strip()) < 300 and extractor.img_srcs and settings.gemini_api_key:
+                import base64
+                from urllib.parse import urljoin
+                vision_parts: list[str] = []
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as img_client:
+                    for src in extractor.img_srcs[:6]:
+                        try:
+                            img_url = urljoin(url, src)
+                            ir = await img_client.get(img_url, headers={"User-Agent": "Mozilla/5.0"})
+                            img_bytes = ir.content
+                            if len(img_bytes) < 8000:  # 아이콘·썸네일 제외
+                                continue
+                            mime = "image/png" if img_bytes[:8] == b'\x89PNG\r\n\x1a\n' else "image/jpeg"
+                            b64 = base64.b64encode(img_bytes).decode()
+                            from langchain_google_genai import ChatGoogleGenerativeAI
+                            from langchain_core.messages import HumanMessage as _HM
+                            vlm = ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.gemini_api_key)
+                            vr = await vlm.ainvoke([_HM(content=[
+                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                                {"type": "text", "text": "이 이미지에서 채용공고 텍스트를 모두 추출해줘. 회사명, 담당업무, 자격요건, 우대사항 전부 포함."},
+                            ])])
+                            extracted = _extract_text(vr.content).strip()
+                            if extracted:
+                                vision_parts.append(extracted)
+                        except Exception as ve:
+                            logger.debug("[tool] vision img failed: %s", ve)
+                if vision_parts:
+                    logger.info("[tool] summarize_url vision fallback images=%d", len(vision_parts))
+                    raw_text = "\n\n".join(vision_parts)[:3000]
 
             if not raw_text.strip():
                 return "페이지 내용을 가져왔지만 텍스트를 추출하지 못했습니다."
