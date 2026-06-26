@@ -191,87 +191,25 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 logger.warning("[security] SSRF attempt blocked: %s (Resolved IP: %s)", url, ip_str)
                 return "보안 정책상 내부 네트워크 주소에는 접근할 수 없습니다."
 
-            import httpx
-            from html.parser import HTMLParser
+            import base64
+            from playwright.async_api import async_playwright
+            from langchain_core.messages import HumanMessage
 
-            class _TextExtractor(HTMLParser):
-                def __init__(self):
-                    super().__init__()
-                    self.texts: list[str] = []
-                    self.img_srcs: list[str] = []
-                    self._skip = False
+            async with async_playwright() as p:
+                browser = await p.chromium.launch()
+                page = await browser.new_page()
+                await page.goto(url, wait_until="networkidle", timeout=30000)
+                shot = await page.screenshot(full_page=True, type="png")
+                await browser.close()
 
-                def handle_starttag(self, tag, attrs):
-                    if tag in ("script", "style", "head", "nav", "footer"):
-                        self._skip = True
-                    if tag == "img":
-                        d = dict(attrs)
-                        src = d.get("src") or d.get("data-src") or d.get("data-lazy-src")
-                        if src:
-                            self.img_srcs.append(src)
-
-                def handle_endtag(self, tag):
-                    if tag in ("script", "style", "head", "nav", "footer"):
-                        self._skip = False
-
-                def handle_data(self, data):
-                    if not self._skip and data.strip():
-                        self.texts.append(data.strip())
-
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                resp.raise_for_status()
-                html_body = resp.text
-
-            extractor = _TextExtractor()
-            extractor.feed(html_body)
-            raw_text = " ".join(extractor.texts)[:3000]
-
-            # 텍스트가 빈약하면 페이지 내 이미지를 Vision으로 보완
-            if len(raw_text.strip()) < 300 and extractor.img_srcs and settings.gemini_api_key:
-                import base64
-                from urllib.parse import urljoin
-                vision_parts: list[str] = []
-                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as img_client:
-                    for src in extractor.img_srcs[:6]:
-                        try:
-                            img_url = urljoin(url, src)
-                            ir = await img_client.get(img_url, headers={"User-Agent": "Mozilla/5.0"})
-                            img_bytes = ir.content
-                            if len(img_bytes) < 8000:  # 아이콘·썸네일 제외
-                                continue
-                            mime = "image/png" if img_bytes[:8] == b'\x89PNG\r\n\x1a\n' else "image/jpeg"
-                            b64 = base64.b64encode(img_bytes).decode()
-                            from langchain_google_genai import ChatGoogleGenerativeAI
-                            from langchain_core.messages import HumanMessage as _HM
-                            vlm = ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.gemini_api_key)
-                            vr = await vlm.ainvoke([_HM(content=[
-                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                                {"type": "text", "text": "이 이미지에서 채용공고 텍스트를 모두 추출해줘. 회사명, 담당업무, 자격요건, 우대사항 전부 포함."},
-                            ])])
-                            extracted = _extract_text(vr.content).strip()
-                            if extracted:
-                                vision_parts.append(extracted)
-                        except Exception as ve:
-                            logger.debug("[tool] vision img failed: %s", ve)
-                if vision_parts:
-                    logger.info("[tool] summarize_url vision fallback images=%d", len(vision_parts))
-                    raw_text = "\n\n".join(vision_parts)[:3000]
-
-            if not raw_text.strip():
-                return "페이지 내용을 가져왔지만 텍스트를 추출하지 못했습니다."
-
-            from langchain_core.messages import HumanMessage, SystemMessage
-            try:
-                llm = _make_gemini() if settings.gemini_api_key else _make_ollama()
-                resp_llm = await llm.ainvoke([
-                    SystemMessage(content="주어진 웹페이지 내용을 한국어로 3-5문장으로 요약해줘."),
-                    HumanMessage(content=f"URL: {url}\n\n내용:\n{raw_text}"),
-                ])
-                return f"📄 *URL 요약*\n{resp_llm.content}"
-            except Exception as e:
-                logger.warning("[tool] summarize_url LLM failed: %s", e)
-                return f"📄 *URL 내용 (요약 실패)*\n{raw_text[:500]}..."
+            b64 = base64.b64encode(shot).decode()
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            vlm = ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.gemini_api_key)
+            vr = await vlm.ainvoke([HumanMessage(content=[
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                {"type": "text", "text": "이 페이지의 내용을 한국어로 요약해줘. 채용공고라면 회사명, 담당업무, 자격요건, 우대사항을 모두 포함해줘."},
+            ])])
+            return f"📄 *URL 요약*\n{_extract_text(vr.content).strip()}"
         except Exception as e:
             logger.warning("[tool] summarize_url failed url=%s: %s", url[:50], e)
             return f"URL 내용을 가져오지 못했습니다: {e}"
