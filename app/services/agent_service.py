@@ -85,6 +85,10 @@ def _build_system_prompt() -> str:
 | 파일 카테고리 설정·변경 | set_file_category |
 | 저장된 카테고리 목록 조회 | list_categories |
 | 파일 삭제 ("파일 지워줘", "삭제해줘") — 후보 목록 표시 후 정확한 파일명 확인 | delete_file |
+| "이력서 작성해줘 [회사명]" + 채용공고 내용 | create_resume(company_name=회사명, job_posting=공고내용) |
+| "이력서 틀 저장되어있어?" 또는 이력서 템플릿 여부 확인 | save_resume_template |
+| "SEMS 프로젝트에 XX 추가해줘", "PLANIN에서 XX를 YY로 수정해줘" | edit_resume_project(project_name=프로젝트명, instruction=수정내용) |
+| "이력서 프로젝트 목록 보여줘", 어떤 프로젝트 있는지 확인 | list_resume_projects |
 
 **파일 목록 vs 파일 전송 구분 — 반드시 준수:**
 - "목록", "뭐 있어", "어떤 거", "보여줘" → list_only=True (파일 전송 금지)
@@ -585,6 +589,98 @@ def _make_tools(user_id: str, channel_id: str = ""):
         return "카테고리 목록:\n" + "\n".join(f"• {c}" for c in categories)
 
     @langchain_tool
+    async def edit_resume_project(project_name: str, instruction: str) -> str:
+        """이력서 특정 프로젝트 내용을 수정하거나 업무를 추가합니다.
+        project_name: 수정할 프로젝트명 (부분 일치 가능, 예: 'SEMS', 'PLANIN', 'PuppyNote')
+        instruction: 수정 내용 (예: '배포 자동화 업무 추가해줘', 'Redis 항목을 ~로 수정해줘')"""
+        from app.services import resume_service
+
+        if not resume_service.template_exists():
+            return "이력서 템플릿이 없습니다. 먼저 HTML 파일을 업로드하면서 '내 이력서 틀이야 저장해줘'라고 해주세요."
+
+        if not channel_id:
+            return "Slack 채널 정보가 없어 파일을 전송할 수 없습니다."
+
+        from app.services import slack_service
+        await slack_service.send_message(channel_id, f"✏️ *{project_name}* 프로젝트 수정 중... (잠시만 기다려주세요)")
+
+        try:
+            matched_title, html_bytes = await asyncio.wait_for(
+                resume_service.edit_resume_project(project_name, instruction),
+                timeout=180,
+            )
+        except FileNotFoundError as e:
+            return str(e)
+        except ValueError as e:
+            return str(e)
+        except asyncio.TimeoutError:
+            return "수정 시간 초과. 다시 시도해주세요."
+        except Exception as e:
+            logger.warning("[tool] edit_resume_project failed: %s", e)
+            return f"수정 중 오류: {e}"
+
+        await slack_service.upload_file(
+            channel_id,
+            "한상기_이력서_수정본.html",
+            html_bytes,
+            f"✅ *{matched_title}* 수정 완료! 확인 후 마음에 들면 이 파일을 '내 이력서 틀이야 저장해줘'로 저장하세요.",
+        )
+        return f"*{matched_title}* 수정본 HTML 파일 전송했습니다."
+
+    @langchain_tool
+    async def list_resume_projects() -> str:
+        """이력서 템플릿에 등록된 프로젝트 목록을 조회합니다."""
+        from app.services import resume_service
+        titles = resume_service.list_project_titles()
+        if not titles:
+            return "이력서 템플릿이 없거나 프로젝트가 없습니다."
+        lines = "\n".join(f"• {t}" for t in titles)
+        return f"이력서 프로젝트 목록 ({len(titles)}개):\n{lines}"
+
+    @langchain_tool
+    async def save_resume_template(confirmed: bool = True) -> str:
+        """이력서 HTML 템플릿을 저장합니다. 사용자가 HTML 파일과 함께 '이력서 틀이야 저장해줘'라고 할 때 호출하세요."""
+        from app.services import resume_service
+        if resume_service.template_exists():
+            return "이력서 템플릿이 이미 저장되어 있습니다. 새 HTML 파일을 업로드하면 덮어씁니다."
+        return "이력서 HTML 파일을 Slack에 업로드하면서 '이력서 틀이야 저장해줘'라고 말해주세요."
+
+    @langchain_tool
+    async def create_resume(company_name: str, job_posting: str) -> str:
+        """채용공고를 분석해 자기소개를 생성하고 이력서 PDF를 만듭니다.
+        company_name: 회사명, job_posting: 채용공고 전문 또는 요약"""
+        from app.core.database import AsyncSessionLocal
+        from app.services import resume_service, file_service, slack_service
+
+        if not resume_service.template_exists():
+            return "이력서 템플릿이 없습니다. 먼저 HTML 파일을 업로드하면서 '내 이력서 틀이야 저장해줘'라고 해주세요."
+
+        if not channel_id:
+            return "Slack 채널 정보가 없어 PDF를 전송할 수 없습니다."
+
+        await slack_service.send_message(channel_id, f"📝 *{company_name}* 이력서 생성 중... (Gemma4가 자기소개 작성 중, 1-2분 소요)")
+
+        try:
+            pdf_bytes = await asyncio.wait_for(
+                resume_service.generate_resume(company_name, job_posting),
+                timeout=300,
+            )
+        except FileNotFoundError as e:
+            return str(e)
+        except asyncio.TimeoutError:
+            return "이력서 생성 시간 초과. 다시 시도해주세요."
+        except Exception as e:
+            logger.warning("[tool] create_resume failed: %s", e)
+            return f"이력서 생성 중 오류: {e}"
+
+        filename = f"한상기 이력서 ({company_name}).pdf"
+        async with AsyncSessionLocal() as db:
+            await file_service.save_file(db, user_id, filename, pdf_bytes, "application/pdf", category="이력서")
+
+        await slack_service.upload_file(channel_id, filename, pdf_bytes, f"*{company_name}* 맞춤 이력서입니다.")
+        return f"✅ *{company_name}* 이력서 PDF 생성 완료! 이력서 카테고리에도 저장했습니다."
+
+    @langchain_tool
     async def delete_file(query: str) -> str:
         """파일 삭제 요청 시 후보 목록을 먼저 보여줍니다. 사용자가 정확한 파일명을 입력하면 삭제됩니다. query: 파일명·카테고리·날짜 등. '전체' 또는 '모두' 입력 시 전체 목록 표시."""
         logger.info("[tool] delete_file user=%s query=%s", user_id, query[:50])
@@ -638,6 +734,8 @@ def _make_tools(user_id: str, channel_id: str = ""):
         web_search, find_file, list_files,
         find_files_by_category, set_file_category, list_categories,
         delete_file,
+        save_resume_template, create_resume,
+        edit_resume_project, list_resume_projects,
     ]
 
 

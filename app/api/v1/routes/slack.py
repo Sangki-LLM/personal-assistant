@@ -65,6 +65,51 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     # 파일 이벤트 처리
     files = event.get("files", [])
     if files:
+        # 이력서 HTML 템플릿 저장 감지: HTML 파일 1개 + "이력서 틀" 키워드
+        _RESUME_KEYWORDS = {"이력서 틀", "이력서틀", "resume template", "이력서 템플릿"}
+        is_resume_template = (
+            len(files) == 1
+            and files[0].get("mimetype", "").startswith("text/html")
+            and any(kw in text for kw in _RESUME_KEYWORDS)
+        )
+
+        # 이력서 사진 저장 감지: 이미지 파일 + "이력서 사진" 키워드
+        _PHOTO_KEYWORDS = {"이력서 사진", "이력서사진", "resume photo", "이력서 사진이야", "프로필 사진이야"}
+        is_resume_photo = (
+            len(files) == 1
+            and files[0].get("mimetype", "").startswith("image/")
+            and any(kw in text for kw in _PHOTO_KEYWORDS)
+        )
+
+        if is_resume_photo:
+            from app.services import file_service as _fs
+            from pathlib import Path
+            _PHOTO_DEST = Path(__file__).parent.parent.parent.parent / "templates" / "photo.jpg"
+            try:
+                img_bytes = await _fs._download(
+                    files[0].get("url_private") or files[0].get("url_private_download", "")
+                )
+                _PHOTO_DEST.parent.mkdir(parents=True, exist_ok=True)
+                _PHOTO_DEST.write_bytes(img_bytes)
+                await slack_service.send_message(channel_id, "✅ 이력서 사진 저장 완료! 다음 이력서 생성 시 자동으로 포함됩니다.")
+            except Exception as e:
+                logger.warning("[slack] resume photo save failed: %s", e)
+                await slack_service.send_message(channel_id, f"사진 저장 실패: {e}")
+            return
+
+        if is_resume_template:
+            from app.services import file_service as _fs, resume_service
+            try:
+                html_bytes = await _fs._download(
+                    files[0].get("url_private") or files[0].get("url_private_download", "")
+                )
+                msg = resume_service.save_template(html_bytes)
+                await slack_service.send_message(channel_id, f"✅ {msg} — 이제 '이력서 작성해줘 [회사명]\\n[채용공고]' 형식으로 사용하세요.")
+            except Exception as e:
+                logger.warning("[slack] resume template save failed: %s", e)
+                await slack_service.send_message(channel_id, f"이력서 템플릿 저장 실패: {e}")
+            return
+
         from app.core.database import AsyncSessionLocal
         from app.services import file_service
 

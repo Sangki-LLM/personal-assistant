@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Pretendard', -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    font-size: 10.5pt;
+    color: #1a1a1a;
+    background: white;
+    padding: 30px 48px;
+    line-height: 1.6;
+  }
+
+  .name { font-size: 34pt; font-weight: 700; margin-bottom: 18px; color: #111; }
+
+  .header-main { display: flex; gap: 24px; align-items: flex-start; margin-bottom: 14px; }
+
+  .header-photo {
+    width: 148px; height: 180px; object-fit: cover; flex-shrink: 0;
+    background: #e0e0e0; display: block;
+  }
+
+  .header-intro { flex: 1; font-size: 10.5pt; line-height: 1.78; color: #2a2a2a; padding-top: 4px; }
+
+  .contact-row {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 3px 24px; font-size: 9.5pt; color: #444; margin-bottom: 14px;
+  }
+  .contact-row a { color: #1a1a1a; text-decoration: none; }
+
+  hr.thick { border: none; border-top: 1.5px solid #111; margin: 8px 0 14px; }
+  hr.thin  { border: none; border-top: 1px solid #ddd;  margin: 10px 0; }
+
+  section { margin-bottom: 16px; }
+
+  .skills-grid {
+    display: grid; grid-template-columns: 100px 1fr;
+    gap: 5px 8px; font-size: 10.5pt;
+  }
+  .skill-label { font-weight: 700; white-space: nowrap; color: #111; }
+
+  .univ-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 10.5pt; }
+  .univ-dept { font-weight: 700; }
+  .univ-period { font-size: 9.5pt; color: #666; }
+
+  .exp-item { margin-bottom: 10px; }
+  .exp-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; }
+  .exp-company { font-weight: 700; font-size: 11pt; }
+  .exp-period { font-size: 9.5pt; color: #666; }
+
+  .section-title { font-size: 15pt; font-weight: 700; color: #111; margin-bottom: 14px; }
+
+  .project { margin-bottom: 22px; }
+  .project-title { font-size: 11.5pt; font-weight: 700; color: #111; margin-bottom: 4px; }
+  .project-meta { font-size: 9.5pt; color: #555; line-height: 1.65; margin-bottom: 5px; }
+  .project-desc { font-size: 10.5pt; color: #333; margin-bottom: 8px; }
+  .project-subtitle { font-weight: 700; font-size: 10.5pt; margin: 7px 0 4px; }
+  .project-stack { font-size: 10.5pt; color: #333; margin-bottom: 6px; }
+
+  ul.ach { padding-left: 18px; }
+  ul.ach li { font-size: 10.5pt; margin-bottom: 5px; line-height: 1.65; color: #222; }
+  ul.ach li strong { font-weight: 700; }
+
+  .edu-name { font-weight: 700; font-size: 11pt; margin-bottom: 4px; }
+  .edu-detail { font-size: 10pt; color: #444; padding-left: 10px; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+
+<div class="name">한상기</div>
+
+<div class="header-main">
+  <img class="header-photo" src="{{ photo_path }}" alt="" onerror="this.style.background='#e0e0e0';">
+  <div class="header-intro">{{ intro }}</div>
+</div>
+
+<div class="contact-row">
+  <span>🗓 1996.10.27</span>
+  <span>✉ <a href="mailto:tkdrl8908@naver.com">tkdrl8908@naver.com</a></span>
+  <span>📱 010-6409-1048</span>
+  <span>🔗 <a href="https://github.com/SangkiHan">https://github.com/SangkiHan</a></span>
+</div>
+
+<hr class="thick">
+
+<section>
+  <div class="skills-grid">
+    <div class="skill-label">Backend</div>
+    <div>Java, Spring Framework, Python, FastAPI, MyBatis, JPA, SQLAlchemy, Kafka</div>
+    <div class="skill-label">Database</div>
+    <div>MySQL, PostgreSQL, Redis, MongoDB, ElasticSearch, ChromaDB</div>
+    <div class="skill-label">AI/LLM</div>
+    <div>LangChain, LangGraph, Ollama, RAG (Hybrid Search · Graph RAG)</div>
+    <div class="skill-label">Cloud</div>
+    <div>AWS, Azure</div>
+    <div class="skill-label">CI/CD</div>
+    <div>AWS codepipeline, Jenkins, Github Action</div>
+    <div class="skill-label">Monitoring</div>
+    <div>Prometheus, Grafana</div>
+  </div>
+</section>
+
+<hr class="thick">
+
+<section>
+  <div class="univ-row">
+    <span class="univ-dept">한신대학교 컴퓨터공학부</span>
+    <span class="univ-period">2015.03 ~ 2022.02</span>
+  </div>
+</section>
+
+<hr class="thick">
+
+<section>
+  <div class="exp-item">
+    <div class="exp-header">
+      <span class="exp-company">티앤엠테크</span>
+      <span class="exp-period">2025.05 ~ 현재</span>
+    </div>
+    <ul class="ach" style="margin-top:3px;">
+      <li>SEMS (GS25, GSFRESH 점포관제앱, 웹) 고도화 및 유지보수</li>
+    </ul>
+  </div>
+  <hr class="thin">
+  <div class="exp-item">
+    <div class="exp-header">
+      <span class="exp-company">큐텐테크놀로지</span>
+      <span class="exp-period">2024.05 ~ 2024.12 (7개월)</span>
+    </div>
+    <ul class="ach" style="margin-top:3px;">
+      <li>사내 웹 서비스 유지보수 업무</li>
+    </ul>
+  </div>
+  <hr class="thin">
+  <div class="exp-item">
+    <div class="exp-header">
+      <span class="exp-company">모빌씨앤씨</span>
+      <span class="exp-period">2021.08 ~ 2024.03 (2년 8개월)</span>
+    </div>
+    <ul class="ach" style="margin-top:3px;">
+      <li>SK쉴더스 B2B, B2C 앱 서버 유지보수 진행</li>
+      <li>(주) 캡스텍 PLANIN 신규개발, 유지보수 진행</li>
+    </ul>
+  </div>
+</section>
+
+<hr class="thick">
+
+<div class="section-title">프로젝트</div>
+
+<div class="project">
+  <div class="project-title">리뉴얼 SEMS (GS25, GSFRESH 점포관제앱, 웹) (고도화, 유지보수)</div>
+  <div class="project-meta">백엔드 엔지니어 | 티앤엠테크 - 2025.05 ~ 현재<br>서비스팀 (백엔드 2명, 프론트엔드 2명)</div>
+  <div class="project-desc">기존 GS25, GSFRESH 점포관제앱, 웹을 고도화 한 프로젝트입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java 17, Spring Boot3, PostgreSQL, MongoDB, MyBatis, JPA, Azure, Docker, Prometheus, Grafana, Kafka, Python, FastAPI, LangChain, LangGraph, Ollama, ChromaDB</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>Ollama + 로컬 LLM(gemma4:12b)을 활용한 <strong>에러 탐지, 코드 리팩토링 제안 및 PR 생성 시스템</strong></li>
+    <li>기존 Function App 환경에서 발생하던 <strong>병목 현상 및 데이터 유실 문제</strong>를 원천 해결하기 위해, <strong>Kafka 기반의 비동기 메시징 파이프라인을 도입</strong>하여 대용량 트래픽 처리의 안정성 확보</li>
+    <li><strong>Kafka Consumer Lag 모니터링</strong> 지표를 대시보드(Grafana 등)로 시각화하여, 데이터 처리 지연 발생 시 실시간으로 감지하고 대응할 수 있는 <strong>운영 가시성 확보</strong></li>
+    <li>점포의 5분 단위 전력·온도 데이터 <strong>약 30억 건을 MySQL→MongoDB로 이관</strong></li>
+    <li>MySQL → MongoDB 이관 및 구조 최적화를 통해 5분 단위 데이터 조회 API 성능 <strong>8초 → 200ms로 개선 (약 40배 향상)</strong></li>
+    <li>PostgreSQL 환경에서 pg_partman을 이용하여 <strong>대용량 테이블 파티셔닝 전략</strong>을 적용하여, 불필요한 풀스캔(Full Scan)을 방지하고 <strong>조회 쿼리 속도 대폭 개선 10s → 900ms</strong></li>
+    <li>서버리스(Function App) 티어 조정(Scale Down) 및 아키텍처 최적화를 단행하여, <strong>Azure 인프라 월 유지 비용 37% 절감 달성</strong></li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">SEMS (GS25, GSFRESH 점포관리앱, 웹) (유지보수)</div>
+  <div class="project-meta">백엔드 엔지니어 | 티앤엠테크 - 2025.05 ~ 2025.12 (7개월)<br>서비스팀 (백엔드 2명, 프론트엔드 2명)</div>
+  <div class="project-desc">GS25 편의점과 GSFRESH 슈퍼의 냉장비, 냉난방, 간판, 조명 전력량을 체크하고 상태를 확인 및 관리할 수 있는 서비스입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java 8, Spring Framework 4.0.2, MySQL, MyBatis, NCloud, NCloud Storage</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>주기적 OutOfMemory로 인한 서버 다운 문제를 <strong>Jmap 기반 메모리 누수 분석</strong> 및 힙 메모리 증설로 해결 → <strong>5개월간 서버 다운 0건</strong></li>
+    <li>테스트 코드 도입으로 배포 전 사전 검증 환경 구축 → <strong>도입 이후 기능 오류로 인한 롤백 0건 달성</strong></li>
+    <li>NCloud Object Storage 도입으로 로컬 저장 구조 개선 → <strong>30GB 이상 저장 공간 확보 및 서버 용량 문제 해결</strong></li>
+    <li><strong>배포 스크립트 자동화</strong>로 Windows 서버에서 Tomcat 수동 재시작 업무를 자동화하여 운영 효율 향상 → 배포 과정에서의 <strong>휴먼 에러 방지</strong> 및 운영 효율성 대폭 향상</li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">큐텐, 티몬, 위메프, 인터파크 Analytics 웹 (유지보수)</div>
+  <div class="project-meta">풀스택 엔지니어 | 큐텐테크놀로지 - 2024.05 ~ 2024.10 (5개월)<br>Info Dev 팀(4명)</div>
+  <div class="project-desc">큐텐, 티몬, 위메프의 화면 통계, 매출 통계, 상품 통계 등 다양한 데이터를 제공하여 사용자들이 쉽게 분석할 수 있도록 돕는 웹사이트입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java8, Spring boot 1.5.1, MSSQL, Mybatis, JavaScript, JSP, JQuery</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>화면 접속 통계, 매출 통계, 상품 통계 등 데이터 제공 기능 유지보수</li>
+    <li>ElasticSearch aggregation을 사용하여 <strong>국가별 데이터 그룹핑 자동화</strong> 기능 개발</li>
+    <li>기존 국가 코드 추가 작업 필요 없이 <strong>신규 국가 추가 시 코드 수정 필요성 100% 제거</strong></li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">큐텐 그룹웨어 (유지보수)</div>
+  <div class="project-meta">풀스택 엔지니어 | 큐텐테크놀로지 - 2024.05 ~ 2024.10 (5개월)<br>Info Dev 팀(4명)</div>
+  <div class="project-desc">큐텐 사원들이 기안서 상신, 휴가 등록, 공지사항 등록 등 사내에서 필요한 서비스를 제공하는 웹사이트입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java8, Spring boot 1.5.1, MSSQL, Mybatis, JavaScript, JSP, JQuery</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>사내 기안서, 상신, 휴가 등록, 공지사항 서비스 유지보수</li>
+    <li>기안서 상태 조회 시 Join문 제거하여 <strong>쿼리 응답 속도 약 40% 향상</strong> 및 쿼리 가독성 개선</li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">(주)캡스텍 PLANIN(현장인력 인원/서류 관리 웹) (신규개발, 유지보수)</div>
+  <div class="project-meta">백엔드 엔지니어 | 모빌씨앤씨 - 2022.06 ~ 2024.03 (1년 9개월)<br>전략운영팀(백엔드 2명, 프론트 2명, 디자이너 1명, 기획자 1명)</div>
+  <div class="project-desc">캡스텍의 현장 인력 관리의 오프라인 서류 업무를 디지털화하여, 알림톡 기반 모바일 서명 및 관리 프로세스로 혁신한 플랫폼입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java8, Spring boot 2.6, AWS Aurora, JPA, Mybatis, Docker, ECR, AWS codepipeline</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>DB 테이블 설계</li>
+    <li><strong>Interceptor와 AOP를 활용해</strong> 사용자 권한 검증 및 인가(Authorization) 로직을 <strong>공통 모듈화</strong>하여, 핵심 비즈니스 로직의 결합도를 낮추고 보안성 강화</li>
+    <li>파일 업로드 <strong>FTP 연동</strong>, <strong>확장자 검증</strong> 메소드 구현</li>
+    <li><strong>@ControllerAdvice를 도입</strong>하여 전역 예외 처리를 하고, 불필요한 try-catch 중복 코드를 <strong>약 90% 감소</strong>시켜 유지보수성 대폭 향상</li>
+    <li>FileInputStream close 처리 누락으로 발생한 <strong>메모리 누수 문제 해결</strong> (메모리 사용량 FullGC 후 90% → <strong>30% 감소</strong>)</li>
+    <li><strong>Redis 기반 글로벌 Session 저장소</strong>를 구축하고, 다중 AZ 및 Failover를 적용해 서버 장애나 배포 시에도 <strong>Session 유실 없는 무중단 사용자 경험 제공</strong></li>
+    <li>Docker 컨테이너 기반 환경을 구축하고 <strong>AWS ECR과 연동</strong>하여 이미지 관리 프로세스를 일원화함으로써, 배포 파이프라인 최적화 및 운영 서버의 <strong>디스크 용량 부족 문제 원천 해결</strong></li>
+    <li><strong>Apache POI를 활용한 엑셀 데이터 파싱</strong> 로직을 구현하여 약 2,000명의 인력 및 200개 사업장 정보를 자동 마이그레이션하고, 수기 등록 대비 <strong>초기 데이터 세팅 공수 90% 절감</strong></li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">SK쉴더스 마이캡스(ADT캡스 사용고객 앱) (유지보수)</div>
+  <div class="project-meta">백엔드 엔지니어 | 모빌씨앤씨 - 2023.04 ~ 2024.03 (11개월)<br>전략운영팀(백엔드 2명, 프론트 2명)</div>
+  <div class="project-desc">SK쉴더스의 보안 상품을 가입한 고객들을 대상으로 보안 관리를 지원해주는 앱입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java8, Spring framework 4.3.18, AWS Aurora, Mybatis</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>OAuth2.0 기반 SK쉴더스 통합 인증 로그인 기능 개발</li>
+    <li>RefreshToken을 Redis에 저장하여 <strong>토큰 재발급 속도 평균 150ms → 20ms로 개선</strong>하여 성능 최적화</li>
+    <li>외부 API 연동을 위한 <strong>제네릭(Generic) 기반 공통 Service를 설계</strong>하여 응답값 자동 매핑을 구현하고, 반복되는 코드를 제거해 신규 API 연동의 생산성 및 유지보수성 대폭 향상</li>
+  </ul>
+</div>
+
+<hr class="thick">
+
+<div class="section-title">개인프로젝트</div>
+
+<div class="project">
+  <div class="project-title">Slack 개인비서</div>
+  <div class="project-meta">개인프로젝트 - 2026.05 ~ 2026.06 (1개월)<br>Slack DM으로 일정·할 일·리마인더·파일 저장·뉴스 브리핑을 처리하는 LLM 기반 AI 개인 비서 플랫폼입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack"><strong>서버</strong>: Python, FastAPI, LangGraph, LangChain, Gemini API, Ollama, Gemma4, ChromaDB, LlamaIndex, kiwipiepy</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li><strong>LangGraph ReAct 에이전트</strong>로 자연어 명령을 도구 자율 선택·실행으로 연결, Gemini 할당량 초과 시 Ollama(Gemma4:12B) 자동 폴백으로 무중단 응답 보장</li>
+    <li><strong>ChromaDB + LlamaIndex 기반 RAG</strong> — 벡터 + BM25 RRF 하이브리드 검색으로 저장된 기억을 매 대화 전 자동 검색해 컨텍스트로 주입</li>
+    <li><strong>kiwipiepy 형태소 분석기</strong> 도입으로 한국어 파싱 로직의 정규식을 교체, 조사·활용형 변화에 강건하게 처리</li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">PuppyNote (반려동물 관리 앱)</div>
+  <div class="project-meta">개인프로젝트 - 2026.01 ~ 2026.02 (1개월) · 반려동물의 건강기록, 산책, 급식, 용품 등을 관리하고 가족 구성원과 공유할 수 있는 반려동물 케어 플랫폼입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">
+    <strong>서버</strong>: Java 17, Spring Boot 3, MySQL, Redis, Elasticsearch, Logstash, AWS S3 / CloudFront, AWS Codepipeline<br>
+    <strong>프론트</strong>: TypeScript, React Native (Expo), NativeWind, Docker
+  </div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>게시글 '좋아요' 기능에 <strong>Redis 기반의 Write-Behind 캐싱 패턴</strong>을 적용하여, 다수의 동시 요청으로 인한 <strong>동시성(Race Condition) 문제를 방어</strong>하고 RDBMS의 쓰기(Write) 부하를 대폭 감소</li>
+    <li>대용량 게시물 환경에서의 <strong>복잡한 조건 검색 및 조회 성능</strong>을 극대화하기 위해, 기존 MySQL에서 검색 특화 엔진인 <strong>ElasticSearch로 데이터 저장소 전환</strong></li>
+    <li><strong>Logstash를 도입</strong>하여 MySQL과 ElasticSearch 간의 자동 데이터 동기화 파이프라인을 구축함으로써, 웹 서버의 데이터 동기화 책임을 분리(Decoupling)하고 서버 부하 최소화</li>
+    <li>Prometheus와 Grafana를 활용해 서버 리소스(CPU/Memory) 모니터링 환경을 구축하고, <strong>사용률 80% 초과 시 Slack Alert가 발송</strong>되도록 구성하여 선제적인 장애 대응 체계 마련</li>
+    <li>운영 서버의 보안 강화를 위해 <strong>인바운드 SSH 접근을 전면 차단</strong>하고, 이에 맞춰 배포 파이프라인을 Github Actions에서 <strong>AWS CodePipeline으로 마이그레이션</strong>하여 안전한 무중단 CI/CD 환경 확보</li>
+  </ul>
+</div>
+
+<hr class="thin">
+
+<div class="project">
+  <div class="project-title">Luckkids (행운 기록 및 미션 수행으로 캐릭터 성장 앱)</div>
+  <div class="project-meta">백엔드 엔지니어 | 스터디그룹 - 2023.10 ~ 2025.01 (1년 2개월)<br>백엔드 2명, 프론트 2명, 디자이너 2명, 기획자 1명</div>
+  <div class="project-desc">행운을 얻는 습관들을 관리하고 실천하며 행운 캐릭터를 성장시키는 앱입니다.</div>
+  <div class="project-subtitle">기술 스택</div>
+  <div class="project-stack">Java 17, Spring Boot 3.0.11, JPA, MySQL, Jenkins, Docker, AWS EventBridge, AWS Lambda, S3, RestDocs</div>
+  <div class="project-subtitle">구현 기능/성과</div>
+  <ul class="ach">
+    <li>OAuth2.0 기반 카카오, 구글, 애플 소셜 로그인 구현</li>
+    <li><strong>AWS S3와 CloudFront를 연동</strong>한 정적 리소스(캐릭터 이미지) 전용 CDN 환경을 구축하여, React 프로젝트 번들 용량 <strong>30% 감축</strong> 및 <strong>이미지 로딩 속도 70% 향상</strong></li>
+    <li>Controller 및 Service 계층에 <strong>300여 개의 단위/통합 테스트를 작성</strong>하여 비즈니스 결함을 사전 차단하고, <strong>Spring RestDocs를 도입</strong>해 프로덕션 코드와 100% 동기화되는 신뢰성 높은 API 문서화 환경 구축</li>
+    <li><strong>AWS 서버리스 배치</strong>로 알림 서비스 비용 <strong>100% 절감</strong> (Spring Batch 대비 EC2 비용 제거)</li>
+    <li>AWS LightSail 활용으로 운영 서버 비용을 <strong>월 12달러로 고정</strong> (EC2 대비 약 50% 절감)</li>
+    <li>Jenkins 기반 개발 서버 구축으로 개인 PC 활용 및 <strong>인프라 비용 100% 절감</strong></li>
+  </ul>
+</div>
+
+<hr class="thick">
+
+<div class="section-title">교육</div>
+
+<div class="edu-name">NEXTSTEP</div>
+<div class="edu-detail">TDD, 클린 코드 with JavaScript 7기 &nbsp;|&nbsp; 2025-02-06 ~ 2025-03-26</div>
+<div class="edu-detail">만들면서 배우는 JPA 4기 &nbsp;|&nbsp; 2024-10-10 ~ 2024-11-27</div>
+<div class="edu-detail">TDD, 클린 코드 with Java 19기 &nbsp;|&nbsp; 2024-09-23 ~ 2024-11-07</div>
+
+</body>
+</html>
