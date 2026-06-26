@@ -214,7 +214,9 @@ def _make_tools(user_id: str, channel_id: str = ""):
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                 {"type": "text", "text": "이 페이지의 내용을 한국어로 요약해줘. 채용공고라면 회사명, 담당업무, 자격요건, 우대사항을 모두 포함해줘."},
             ])])
-            return f"📄 *URL 요약*\n{_extract_text(vr.content).strip()}"
+            c = vr.content
+            summary = (" ".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text") if isinstance(c, list) else c or "").strip()
+            return f"📄 *URL 요약*\n{summary}"
         except Exception as e:
             logger.warning("[tool] summarize_url failed url=%s: %s", url[:50], e)
             return f"URL 내용을 가져오지 못했습니다: {e}"
