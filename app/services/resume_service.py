@@ -77,32 +77,54 @@ async def _invoke_llm(messages: list) -> str:
         raise
 
 
+def _calc_career() -> tuple[str, str]:
+    """(경력기간, 년차) 반환 — 예: ('4년 5개월', '5년차')"""
+    from datetime import date
+    today = date.today()
+    experiences = [
+        (date(2021, 8, 1), date(2024, 3, 31)),   # 모빌씨앤씨
+        (date(2024, 5, 1), date(2024, 12, 31)),   # 큐텐테크놀로지
+        (date(2025, 5, 1), today),                 # 티앤엠테크
+    ]
+    total = sum((e.year - s.year) * 12 + e.month - s.month for s, e in experiences)
+    years, months = total // 12, total % 12
+    duration = f"{years}년 {months}개월" if months else f"{years}년"
+    year_level = f"{years + 1}년차"
+    return duration, year_level
+
+
 async def _generate_intro(company_name: str, job_posting: str) -> str:
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    career, year_level = _calc_career()
 
     prompt = f"""다음은 {company_name} 채용공고입니다.
 
 {job_posting}
 
-위 채용공고에 맞는 한상기의 자기소개 문단을 작성해줘.
+위 채용공고에 맞는 한상기의 이력서 자기소개를 작성해줘.
 
-한상기 배경:
+한상기 정보:
+- 총 경력: {career} ({year_level}) — 모빌씨앤씨 → 큐텐테크놀로지 → 티앤엠테크
 - 백엔드 개발자, Java/Spring 메인, Python/FastAPI 경험
 - 현재 티앤엠테크에서 GS25·GSFRESH 점포관제 시스템(SEMS) 유지보수·고도화
 - 30억 건 데이터 MySQL→MongoDB 이관으로 조회 API 40배 성능 개선
-- 600만 건 날씨예보 테이블 파티셔닝으로 쿼리 11배 개선
+- 600만 건 테이블 파티셔닝으로 쿼리 11배 개선
 - Kafka 비동기 파이프라인, LLM/RAG, Redis, Elasticsearch 경험
 - 성능 최적화와 실측 데이터 기반 개선을 즐김
 
-조건:
+작성 규칙:
 - "안녕하세요"로 시작
-- 3~4문장, 자연스러운 한국어
-- {company_name}과 해당 직무에 맞는 핵심 강점 어필
-- 줄바꿈 없이 한 단락으로
-- 과장 없이 실제 경험 기반으로만"""
+- 총 경력은 "{year_level} ({career})" 형태로 그대로 사용 (임의로 바꾸지 말 것)
+- 2~3 문단으로 나눠서 작성, 문단 사이는 빈 줄(\\n\\n)로 구분
+- 문단당 2~3문장
+- {company_name}과 직무에 맞는 핵심 강점 어필
+- AI가 쓴 것처럼 보이지 않게, 사람이 직접 쓴 것처럼 자연스럽게
+- "기여하겠습니다", "도움이 되겠습니다", "함께하겠습니다" 같은 형식적 마무리 금지
+- 실제 수치와 경험 기반으로만 작성, 추상적 표현 최소화"""
 
     return await _invoke_llm([
-        SystemMessage(content="당신은 이력서 자기소개 전문가입니다. 주어진 조건에 맞게 간결하고 임팩트 있는 자기소개를 작성합니다."),
+        SystemMessage(content="당신은 이력서 자기소개 전문 작성가입니다. 채용 담당자가 AI가 쓴 것인지 의심하지 않을 만큼 자연스러운 한국어로 작성합니다."),
         HumanMessage(content=prompt),
     ])
 
