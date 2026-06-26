@@ -3,6 +3,7 @@ services:
     image: personal-assistant:${IMAGE_TAG:-latest}
     container_name: personal-assistant
     restart: always
+    shm_size: '1gb'
     ports:
       - "6002:8000"
     volumes:

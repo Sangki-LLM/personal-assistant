@@ -196,7 +196,12 @@ def _make_tools(user_id: str, channel_id: str = ""):
             from langchain_core.messages import HumanMessage
 
             async with async_playwright() as p:
-                browser = await p.chromium.launch()
+                browser = await p.chromium.launch(args=[
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--disable-setuid-sandbox",
+                ])
                 page = await browser.new_page()
                 await page.goto(url, wait_until="networkidle", timeout=30000)
                 shot = await page.screenshot(full_page=True, type="png")

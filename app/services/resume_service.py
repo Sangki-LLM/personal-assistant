@@ -226,7 +226,12 @@ async def _html_to_pdf(html: str) -> bytes:
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch()
+            browser = await p.chromium.launch(args=[
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--disable-setuid-sandbox",
+                ])
             page = await browser.new_page()
             await page.goto(f"file:///{tmp_path}", wait_until="networkidle")
             pdf_bytes = await page.pdf(
