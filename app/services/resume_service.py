@@ -105,7 +105,7 @@ async def _generate_intro(company_name: str, job_posting: str) -> str:
 위 채용공고에 맞는 한상기의 이력서 자기소개를 작성해줘.
 
 한상기 정보:
-- 총 경력: {career} ({year_level}) — 모빌씨앤씨 → 큐텐테크놀로지 → 티앤엠테크
+- 총 경력: {year_level} — 모빌씨앤씨 → 큐텐테크놀로지 → 티앤엠테크
 - 백엔드 개발자, Java/Spring 메인, Python/FastAPI 경험
 - 현재 티앤엠테크에서 GS25·GSFRESH 점포관제 시스템(SEMS) 유지보수·고도화
 - 30억 건 데이터 MySQL→MongoDB 이관으로 조회 API 40배 성능 개선
@@ -115,7 +115,7 @@ async def _generate_intro(company_name: str, job_posting: str) -> str:
 
 작성 규칙:
 - "안녕하세요"로 시작
-- 총 경력은 "{year_level} ({career})" 형태로 그대로 사용 (임의로 바꾸지 말 것)
+- 경력 표기는 "{year_level} 개발자" 형태만 사용, 개월수 언급 금지
 - 2~3 문단으로 나눠서 작성, 문단 사이는 빈 줄(\\n\\n)로 구분
 - 문단당 2~3문장
 - {company_name}과 직무에 맞는 핵심 강점 어필
