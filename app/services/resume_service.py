@@ -57,17 +57,23 @@ def _is_quota_error(e: Exception) -> bool:
     return any(k in s for k in ("quota", "429", "resource exhausted", "rate limit"))
 
 
+def _extract_text(content) -> str:
+    if isinstance(content, list):
+        return " ".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return content or ""
+
+
 async def _invoke_llm(messages: list) -> str:
     use_gemini = bool(settings.gemini_api_key)
     llm = _make_gemini() if use_gemini else _make_ollama()
     try:
         resp = await llm.ainvoke(messages)
-        return (resp.content or "").strip()
+        return _extract_text(resp.content).strip()
     except Exception as e:
         if use_gemini and _is_quota_error(e):
             logger.warning("[resume] Gemini 할당량 초과 → Ollama 전환")
             resp = await _make_ollama().ainvoke(messages)
-            return (resp.content or "").strip()
+            return _extract_text(resp.content).strip()
         raise
 
 
