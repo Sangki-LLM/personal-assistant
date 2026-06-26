@@ -132,7 +132,15 @@ async def _generate_intro(company_name: str, job_posting: str) -> str:
 def _render(intro: str) -> str:
     template_html = _TEMPLATE_PATH.read_text(encoding="utf-8")
     photo_path = _PHOTO_PATH.as_uri() if _PHOTO_PATH.exists() else ""
-    intro_html = intro.replace("\n", "<br>")
+
+    paragraphs = [p.strip().replace("\n", " ") for p in intro.split("\n\n") if p.strip()]
+    if len(paragraphs) > 1:
+        parts = [f'<p style="margin:0 0 9px 0;">{p}</p>' for p in paragraphs[:-1]]
+        parts.append(f'<p style="margin:0;">{paragraphs[-1]}</p>')
+        intro_html = "".join(parts)
+    else:
+        intro_html = intro.replace("\n", "<br>")
+
     return Template(template_html).render(intro=intro_html, photo_path=photo_path)
 
 
