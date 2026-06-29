@@ -93,52 +93,53 @@ def _calc_career() -> tuple[str, str]:
     return duration, year_level
 
 
+def _extract_resume_text(html: str) -> str:
+    text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.DOTALL)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 async def _generate_intro(company_name: str, job_posting: str) -> str:
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    career, year_level = _calc_career()
+    _, year_level = _calc_career()
+
+    resume_html = _TEMPLATE_PATH.read_text(encoding="utf-8")
+    resume_text = _extract_resume_text(resume_html)
 
     prompt = f"""다음은 {company_name} 채용공고입니다.
 
 {job_posting}
 
-위 채용공고를 읽고 한상기의 이력서 자기소개를 3문단으로 작성해줘.
+다음은 한상기의 이력서 전문입니다. 이 내용만을 근거로 자기소개를 작성하세요. 이력서에 없는 경험은 절대 지어내지 마세요.
 
-한상기 정보:
-- 총 경력: {year_level} — 모빌씨앤씨 → 큐텐테크놀로지 → 티앤엠테크
-- 백엔드 개발자, Java/Spring 메인, Python/FastAPI 경험
-- 현재 티앤엠테크에서 GS25·GSFRESH 점포관제 시스템(SEMS) 유지보수·고도화
-- 30억 건 데이터 MySQL→MongoDB 이관으로 조회 API 40배 성능 개선
-- 600만 건 테이블 파티셔닝으로 쿼리 11배 개선
-- Kafka 비동기 파이프라인, LLM/RAG, Redis, Elasticsearch 경험
-- 성능 최적화와 실측 데이터 기반 개선을 즐김
+[한상기 이력서]
+{resume_text}
 
 반드시 2문단으로만 작성 (3문단 금지):
-[1문단] "안녕하세요. {year_level} 백엔드 개발자 한상기입니다." + 실제로 한 일 수치 포함 (2~3문장)
-[2문단] 채용공고 담당업무·우대사항 중 1~2개를 직접 언급하며 내 경험과 매칭, 마지막 문장은 반드시 "{company_name}에 합류하게 된다면 [담당업무 관련 구체적 표현]에 기여하겠습니다."로 마무리 (2~3문장)
+[1문단] "안녕하세요. {year_level} 백엔드 개발자 한상기입니다." + 이력서에 실제로 적힌 수치·성과 포함 (2~3문장)
+[2문단] 채용공고 담당업무·우대사항 중 1~2개를 직접 언급하며, 이력서에 실제 기재된 경험과 매칭. 마지막 문장은 반드시 "{company_name}에 합류하게 된다면 [담당업무 관련 구체적 표현]에 기여하겠습니다."로 마무리 (2~3문장)
 
 작성 규칙:
 - "안녕하세요"로 시작
 - 경력 표기: "{year_level} 개발자" 형태만, 개월수 언급 금지
 - 문단 사이 빈 줄(\\n\\n)로 구분
 - 문단당 2~3문장, 전체 220자 내외
-- 기술명과 수치 반드시 포함
+- 기술명과 수치는 이력서에 실제로 있는 것만 사용
 
 절대 쓰지 말 것:
+- 이력서에 없는 경험·기술·수치 지어내기
 - "역량", "경험을 살려", "실력", "능력", "역량을 발휘"
 - "관심이 많습니다", "관심을 갖고", "~에 익숙하며"
 - "~을 바로 적용하겠습니다", "~을 극대화하겠습니다", "~을 풀어내겠습니다"
 - "이번 합류를 통해", "함께하겠습니다", "함께 성장", "실질적인 결과를 만들겠습니다"
 - "~에 자신 있습니다", "~에 강점이 있습니다", "~이 연결된다고 생각해", "~라 판단했습니다"
-- "즐깁니다", "집중해왔습니다" 식의 자기 서술, 3번째 문단
-
-예시 (구조 참고용):
-"안녕하세요. {year_level} 백엔드 개발자 한상기입니다. 티앤엠테크에서 30억 건 데이터를 MySQL에서 MongoDB로 이관해 조회 API 속도를 40배 개선했고, 600만 건 테이블을 파티셔닝해 쿼리를 11배 빠르게 만들었습니다.
-
-큐텐테크놀로지에서 Kafka로 주문 이벤트를 비동기 처리하고, Redis로 재고 캐싱을 구성하며 [담당업무 항목] 경험을 쌓았습니다. {company_name}에 합류하게 된다면 [담당업무 관련 구체적 표현]에 기여하겠습니다." """
+- "즐깁니다", "집중해왔습니다" 식의 자기 서술, 3번째 문단"""
 
     return await _invoke_llm([
-        SystemMessage(content="이력서 자기소개 작성가입니다. 자연스럽고 담담한 한국어로 씁니다. 채용공고의 담당업무와 우대사항을 직접 언급해 지원자의 경험과 1:1로 연결합니다. AI가 쓴 티가 나는 표현은 절대 사용하지 않습니다."),
+        SystemMessage(content="이력서 자기소개 작성가입니다. 반드시 제공된 이력서 내용만 근거로 씁니다. 이력서에 없는 내용은 절대 추가하지 않습니다. 자연스럽고 담담한 한국어로 씁니다."),
         HumanMessage(content=prompt),
     ])
 
