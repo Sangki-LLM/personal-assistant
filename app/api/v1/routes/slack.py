@@ -65,6 +65,14 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     # 파일 이벤트 처리
     files = event.get("files", [])
     if files:
+        # event.text + 각 파일의 initial_comment 합산 (Slack이 둘 중 하나에만 텍스트를 넣는 경우 대응)
+        _file_comments = " ".join(
+            (f.get("initial_comment") or {}).get("comment", "")
+            for f in files
+            if isinstance(f.get("initial_comment"), dict)
+        )
+        _full_text = f"{text} {_file_comments}".strip()
+
         # 이력서 HTML 템플릿 저장 감지: HTML 파일 1개 + "이력서 틀" 키워드
         _RESUME_KEYWORDS = {"이력서 틀", "이력서틀", "resume template", "이력서 템플릿"}
         _f0 = files[0] if files else {}
@@ -74,7 +82,7 @@ async def _handle_event(event: dict, channel_id: str) -> None:
                 _f0.get("mimetype", "").startswith("text/html")
                 or _f0.get("filetype") == "html"
             )
-            and any(kw in text for kw in _RESUME_KEYWORDS)
+            and any(kw in _full_text for kw in _RESUME_KEYWORDS)
         )
 
         # 이력서 사진 저장 감지: 이미지 파일 + "이력서 사진" 키워드
@@ -82,17 +90,17 @@ async def _handle_event(event: dict, channel_id: str) -> None:
         is_resume_photo = (
             len(files) == 1
             and files[0].get("mimetype", "").startswith("image/")
-            and any(kw in text for kw in _PHOTO_KEYWORDS)
+            and any(kw in _full_text for kw in _PHOTO_KEYWORDS)
         )
 
-        # 채용공고 이미지 감지: 이미지 파일(1장 이상) + "이력서 작성" 키워드 (사진 저장 키워드 제외)
-        _JOB_IMG_KEYWORDS = {"이력서 작성해줘", "이력서 만들어줘", "이력서 써줘", "이력서 작성"}
+        # 채용공고 이미지 감지: 이미지 파일(1장 이상) + "이력서" 관련 키워드
+        _JOB_IMG_KEYWORDS = {"이력서 작성해줘", "이력서 만들어줘", "이력서 써줘", "이력서 작성", "이력서 써", "이력서 만들어"}
         _img_files = [f for f in files if f.get("mimetype", "").startswith("image/")]
         is_job_posting_image = (
             not is_resume_photo
+            and not is_resume_template
             and len(_img_files) >= 1
-            and len(_img_files) == len(files)
-            and any(kw in text for kw in _JOB_IMG_KEYWORDS)
+            and any(kw in _full_text for kw in _JOB_IMG_KEYWORDS)
         )
 
         if is_resume_photo:
