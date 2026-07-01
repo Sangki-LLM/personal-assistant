@@ -25,9 +25,6 @@ def _extract_text(content) -> str:
 
 
 def _make_llm():
-    if settings.gemini_api_key:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.gemini_api_key)
     return ChatOllama(model=settings.ollama_model, base_url=settings.ollama_host, think=False)
 
 

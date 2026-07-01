@@ -27,30 +27,20 @@ async def _llm_summarize(title: str, body: str) -> str:
         f"제목: {title}\n내용: {body[:400]}"
     )
     try:
-        if settings.gemini_api_key:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            from langchain_core.messages import HumanMessage
-            llm = ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.gemini_api_key)
-            resp = await asyncio.wait_for(llm.ainvoke([HumanMessage(content=prompt)]), timeout=30)
-            raw = resp.content
-            if isinstance(raw, list):
-                return " ".join(b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text").strip()
-            return str(raw).strip()
-        else:
-            # Ollama API 직접 호출 — langchain 우회로 think=false 확실히 적용
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    f"{settings.ollama_host}/api/generate",
-                    json={
-                        "model": settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "options": {"num_predict": 100, "temperature": 0.3},
-                    },
-                )
-                resp.raise_for_status()
-                return resp.json().get("response", "").strip()
+        # 뉴스 요약은 배치 작업 — Ollama 사용으로 Gemini 토큰 절약
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{settings.ollama_host}/api/generate",
+                json={
+                    "model": settings.ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "options": {"num_predict": 100, "temperature": 0.3},
+                },
+            )
+            resp.raise_for_status()
+            return resp.json().get("response", "").strip()
     except Exception as e:
         logger.warning("[news] summarize failed title=%r: %s", title[:30], e)
         return ""
