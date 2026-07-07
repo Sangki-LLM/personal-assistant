@@ -34,6 +34,8 @@ async def generate_resume(company_name: str, job_posting: str, user_intro: str |
         intro = user_intro
         logger.info("[resume] user intro used verbatim len=%d", len(intro))
     else:
+        if not job_posting:
+            raise ValueError("자기소개를 직접 주시거나, 채용공고 내용을 알려주세요.")
         intro = await _generate_intro(company_name, job_posting)
         logger.info("[resume] intro generated len=%d", len(intro))
 

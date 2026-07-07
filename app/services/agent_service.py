@@ -99,6 +99,7 @@ def _build_system_prompt() -> str:
 | 저장된 카테고리 목록 조회 | list_categories |
 | 파일 삭제 ("파일 지워줘", "삭제해줘") — 후보 목록 표시 후 정확한 파일명 확인 | delete_file |
 | "이력서 작성해줘 [회사명]" + 채용공고 내용 | create_resume(company_name=회사명, job_posting=공고내용) |
+| "이력서 작성해줘 [회사명]" + 자기소개 직접 제공 (채용공고 없음) | 채용공고를 다시 묻지 말고 즉시 create_resume(company_name=회사명, job_posting="") 호출 |
 | "이력서 틀 저장되어있어?" 또는 이력서 템플릿 여부 확인 | save_resume_template |
 | "SEMS 프로젝트에 XX 추가해줘", "PLANIN에서 XX를 YY로 수정해줘" | edit_resume_project(project_name=프로젝트명, instruction=수정내용) |
 | "이력서 프로젝트 목록 보여줘", 어떤 프로젝트 있는지 확인 | list_resume_projects |
@@ -642,10 +643,11 @@ def _make_tools(user_id: str, channel_id: str = "", user_intro: str = ""):
         return "이력서 HTML 파일을 Slack에 업로드하면서 '이력서 틀이야 저장해줘'라고 말해주세요."
 
     @langchain_tool
-    async def create_resume(company_name: str, job_posting: str) -> str:
+    async def create_resume(company_name: str, job_posting: str = "") -> str:
         """채용공고를 분석해 자기소개를 생성하고 이력서 PDF를 만듭니다.
         company_name: 회사명, job_posting: 채용공고 전문 또는 요약
-        사용자가 메시지에 '자기소개: ...' 형태로 자기소개를 직접 제공한 경우, 그 원문이 재작성 없이 그대로 사용됩니다."""
+        사용자가 메시지에 '자기소개: ...' 형태로 자기소개를 직접 제공한 경우, 그 원문이 재작성 없이 그대로 사용되며
+        이 경우 job_posting은 없어도 되므로("" 전달) 채용공고 내용을 다시 물어보지 마세요."""
         from app.core.database import AsyncSessionLocal
         from app.services import resume_service, file_service, slack_service
 
