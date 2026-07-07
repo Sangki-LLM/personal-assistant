@@ -26,12 +26,16 @@ def template_exists() -> bool:
     return _TEMPLATE_PATH.exists()
 
 
-async def generate_resume(company_name: str, job_posting: str) -> bytes:
+async def generate_resume(company_name: str, job_posting: str, user_intro: str | None = None) -> bytes:
     if not template_exists():
         raise FileNotFoundError("이력서 템플릿이 없습니다.")
 
-    intro = await _generate_intro(company_name, job_posting)
-    logger.info("[resume] intro generated len=%d", len(intro))
+    if user_intro:
+        intro = user_intro
+        logger.info("[resume] user intro used verbatim len=%d", len(intro))
+    else:
+        intro = await _generate_intro(company_name, job_posting)
+        logger.info("[resume] intro generated len=%d", len(intro))
 
     html = _render(intro)
     pdf = await _html_to_pdf(html)

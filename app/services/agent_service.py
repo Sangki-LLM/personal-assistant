@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import warnings
 from datetime import date
 
@@ -42,6 +43,18 @@ def _make_gemini():
     )
 
 _TOOL_TIMEOUT = 45
+
+_INTRO_MARKER_RE = re.compile(r"자기소개\s*[:：]\s*(.+)", re.DOTALL)
+
+
+def _extract_user_intro(message: str) -> tuple[str, str]:
+    """메시지에서 '자기소개:' 마커 이후 텍스트를 원문 그대로 추출한다. (user_intro, 마커 제거된 메시지) 반환."""
+    m = _INTRO_MARKER_RE.search(message)
+    if not m:
+        return "", message
+    user_intro = m.group(1).strip()
+    cleaned = (message[:m.start()] + message[m.end():]).strip()
+    return user_intro, cleaned
 
 
 def _build_system_prompt() -> str:
@@ -115,7 +128,7 @@ def _build_system_prompt() -> str:
 - save_memory 도구를 호출하면 즉시 저장됩니다. 저장 완료 후 간결하게 "기억했습니다" 형식으로 알려주세요."""
 
 
-def _make_tools(user_id: str, channel_id: str = ""):
+def _make_tools(user_id: str, channel_id: str = "", user_intro: str = ""):
     @langchain_tool
     async def search_memory(query: str) -> str:
         """과거 대화나 기억에서 관련 내용을 검색합니다."""
@@ -631,7 +644,8 @@ def _make_tools(user_id: str, channel_id: str = ""):
     @langchain_tool
     async def create_resume(company_name: str, job_posting: str) -> str:
         """채용공고를 분석해 자기소개를 생성하고 이력서 PDF를 만듭니다.
-        company_name: 회사명, job_posting: 채용공고 전문 또는 요약"""
+        company_name: 회사명, job_posting: 채용공고 전문 또는 요약
+        사용자가 메시지에 '자기소개: ...' 형태로 자기소개를 직접 제공한 경우, 그 원문이 재작성 없이 그대로 사용됩니다."""
         from app.core.database import AsyncSessionLocal
         from app.services import resume_service, file_service, slack_service
 
@@ -641,11 +655,16 @@ def _make_tools(user_id: str, channel_id: str = ""):
         if not channel_id:
             return "Slack 채널 정보가 없어 PDF를 전송할 수 없습니다."
 
-        await slack_service.send_message(channel_id, f"📝 *{company_name}* 이력서 생성 중... (Gemma4가 자기소개 작성 중, 1-2분 소요)")
+        status_msg = (
+            f"📝 *{company_name}* 이력서 생성 중... (제공하신 자기소개를 그대로 사용합니다)"
+            if user_intro
+            else f"📝 *{company_name}* 이력서 생성 중... (Gemma4가 자기소개 작성 중, 1-2분 소요)"
+        )
+        await slack_service.send_message(channel_id, status_msg)
 
         try:
             pdf_bytes = await asyncio.wait_for(
-                resume_service.generate_resume(company_name, job_posting),
+                resume_service.generate_resume(company_name, job_posting, user_intro or None),
                 timeout=300,
             )
         except FileNotFoundError as e:
@@ -830,7 +849,11 @@ async def chat(user_id: str, message: str, channel_id: str = "") -> str:
     llm_name = settings.gemini_model if use_gemini else settings.ollama_model
     logger.info("[agent] using llm=%s", llm_name)
 
-    tools = _make_tools(user_id, channel_id)
+    user_intro, message = _extract_user_intro(message)
+    if user_intro:
+        logger.info("[agent] user intro extracted verbatim len=%d", len(user_intro))
+
+    tools = _make_tools(user_id, channel_id, user_intro)
     history_context = await _get_history_context(user_id)
     augmented_message = await _prefetch_memory(user_id, message)
     if history_context:
