@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Request, Response
@@ -12,6 +13,10 @@ from app.services import agent_service, slack_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/slack", tags=["slack"])
+
+_RESUME_TRIGGER_RE = re.compile(r"이력서\s*(?:써줘|작성해줘|만들어줘|써|작성해|만들어|작성)\s+(\S+)")
+# 마지막으로 언급된 이력서 지원 회사명: user_id → company_name (자기소개만 나중에 따로 보낼 때 사용)
+_last_resume_company: dict[str, str] = {}
 
 _YES = {"예", "네", "ㅇㅇ", "응", "좋아", "맞아", "ㅇ", "ok", "OK", "그래"}
 _NO = {"아니오", "아니", "아냐", "ㄴ", "취소", "no", "No", "NO", "싫어"}
@@ -178,10 +183,14 @@ async def _handle_event(event: dict, channel_id: str) -> None:
     if not text:
         return
 
-    import re
     text = re.sub(r"<@\w+>", "", text).strip()
     if not text:
         return
+
+    # 이력서 회사명 언급 기억 (자기소개만 나중에 따로 보낼 때 사용)
+    _m_company = _RESUME_TRIGGER_RE.search(text)
+    if _m_company:
+        _last_resume_company[user_id] = _m_company.group(1)
 
     # 파일 삭제 확인 대기 중이면 파일명 일치 여부 처리
     if user_id in agent_service._pending_delete:
@@ -232,6 +241,37 @@ async def _handle_event(event: dict, channel_id: str) -> None:
             await slack_service.send_message(channel_id, f"✅ {result}")
         else:
             await slack_service.send_message(channel_id, "취소했습니다.")
+        return
+
+    # 자기소개 직접 제공 감지: LLM 라우팅을 거치지 않고 원문 그대로 이력서를 만든다
+    user_intro, _ = agent_service._extract_user_intro(text)
+    if user_intro:
+        company_name = (_m_company.group(1) if _m_company else _last_resume_company.get(user_id, ""))
+        if not company_name:
+            await slack_service.send_message(channel_id, "어느 회사 이력서인지 알려주세요. 예: '이력서 써줘 [회사명]'")
+            return
+
+        from app.services import resume_service, file_service
+        from app.core.database import AsyncSessionLocal
+
+        if not resume_service.template_exists():
+            await slack_service.send_message(channel_id, "이력서 템플릿이 없습니다. 먼저 HTML 파일을 업로드하면서 '내 이력서 틀이야 저장해줘'라고 해주세요.")
+            return
+
+        _last_resume_company[user_id] = company_name
+        await slack_service.send_message(channel_id, f"📝 *{company_name}* 이력서 생성 중... (제공하신 자기소개를 그대로 사용합니다)")
+
+        try:
+            pdf_bytes = await resume_service.generate_resume(company_name, "", user_intro)
+        except Exception as e:
+            logger.warning("[slack] verbatim intro resume failed: %s", e)
+            await slack_service.send_message(channel_id, f"이력서 생성 중 오류: {e}")
+            return
+
+        filename = f"한상기 이력서 ({company_name}).pdf"
+        async with AsyncSessionLocal() as db:
+            await file_service.save_file(db, user_id, filename, pdf_bytes, "application/pdf", category="이력서")
+        await slack_service.upload_file(channel_id, filename, pdf_bytes, f"*{company_name}* 맞춤 이력서입니다.")
         return
 
     logger.info("[slack] processing user=%s text=%r", user_id, text[:100])
